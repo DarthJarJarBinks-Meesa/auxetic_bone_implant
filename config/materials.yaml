@@ -1,0 +1,245 @@
+# ==============================================================================
+# config/materials.yaml
+# ==============================================================================
+# Material library for the auxetic orthopedic plate pipeline.
+#
+# PURPOSE:
+#   This file is the single source of truth for material properties used by
+#   the simulation, fatigue-proxy, and ranking modules.  It is loaded by
+#   src/simulation/materials.py into typed MaterialDefinition dataclasses.
+#
+# RELATIONSHIP TO OTHER CONFIG FILES:
+#   - base_config.yaml sets `default_material` and references this file path
+#   - sweep_config.yaml references material names from this library by key
+#   - Neither file duplicates property values defined here
+#
+# ARCHITECTURAL DECISION — material library as a standalone YAML:
+#   Keeping materials in a separate file means property updates (e.g. when
+#   validated test data replaces placeholders) require no code changes and
+#   no edits to base_config.yaml or sweep_config.yaml.  The loader in
+#   materials.py reads this file at runtime and validates each entry against
+#   the MaterialDefinition schema.
+#
+# !! IMPORTANT — PLACEHOLDER WARNING !!
+#   Many values in this file are approximate engineering estimates suitable
+#   for version-1 scaffold development only.  Fatigue values in particular
+#   are provisional placeholders.  Do NOT use these values for clinical
+#   decisions, regulatory submissions, or publication without replacing them
+#   with validated, traceable material data.
+#
+# UNITS CONVENTION (consistent with base_config.yaml and case_schema.py):
+#   Length / displacement : mm
+#   Force                 : N
+#   Stress / modulus      : MPa
+#   Density               : g/cm³
+#   Angle                 : degrees
+# ==============================================================================
+
+
+# ------------------------------------------------------------------------------
+# 1. METADATA
+# ------------------------------------------------------------------------------
+
+metadata:
+  library_name: auxetic_plate_material_library
+  version: "1.0.0"
+  description: >
+    Version-1 titanium alloy material library for the auxetic orthopedic plate
+    pipeline.  Supports two titanium alloys (Ti-6Al-4V and Ti-5Al-2.5Fe) for
+    linear-elastic FE simulation and fatigue-risk proxy evaluation.
+
+  notes:
+    - >
+      Mechanical property values are approximate engineering estimates drawn
+      from open literature for version-1 scaffold development.  They are
+      suitable for comparative parametric studies but must be replaced with
+      validated, traceable values before any publication, regulatory, or
+      clinical decision-critical use.
+    - >
+      Fatigue property values (fatigue_limit_mpa) are provisional placeholders.
+      They are used only as threshold references for the fatigue-risk proxy
+      score.  They do NOT constitute validated fatigue design allowables and
+      must NOT be described as such in any report or output.
+    - >
+      The fatigue_limit_is_placeholder flag on each material entry is
+      intentionally visible so that downstream code and log output can
+      explicitly flag low-confidence fatigue results.
+    - >
+      To update a property: edit the value under the relevant material key,
+      update the notes field to record the new source, and set
+      fatigue_limit_is_placeholder to false only when the fatigue value has
+      been validated against a qualified test programme.
+
+
+# ------------------------------------------------------------------------------
+# 2. UNITS
+# ------------------------------------------------------------------------------
+# Explicit unit declarations for every material property field in this file.
+# These must remain consistent with base_config.yaml and case_schema.py.
+#
+# ARCHITECTURAL DECISION — units declared here, not inferred:
+#   Unit declarations make this file self-documenting and allow the materials
+#   loader to validate that loaded values are in the expected system without
+#   relying on field-name conventions alone.
+# ------------------------------------------------------------------------------
+
+units:
+  elastic_modulus:           MPa           # Young's modulus
+  yield_strength:            MPa           # 0.2% proof stress
+  ultimate_tensile_strength: MPa           # UTS
+  fatigue_limit:             MPa           # endurance / fatigue limit (proxy reference only)
+  density:                   g_per_cm3     # mass density
+  poissons_ratio:            dimensionless
+
+
+# ------------------------------------------------------------------------------
+# 3. DEFAULT MATERIAL
+# ------------------------------------------------------------------------------
+# The material used when no explicit material is specified by a case config.
+#
+# ARCHITECTURAL DECISION — Ti-6Al-4V as default:
+#   Ti-6Al-4V is the most widely characterised titanium alloy for orthopedic
+#   implants and has the most available reference data for version-1
+#   placeholder values.  It is the safer default for an unspecified run.
+#   Ti-5Al-2.5Fe is included as a comparison candidate but is less commonly
+#   used as a universal fallback.
+# ------------------------------------------------------------------------------
+
+default_material: Ti-6Al-4V
+
+
+# ------------------------------------------------------------------------------
+# 4. MATERIALS
+# ------------------------------------------------------------------------------
+# One entry per supported material, keyed by the exact material name string
+# used throughout the pipeline (case_schema.py, sweep_config.yaml, reports).
+#
+# ARCHITECTURAL DECISION — mapping keyed by material name string:
+#   Using the material name as the mapping key means any module can look up
+#   a material by name without iterating a list.  The name field inside each
+#   entry is kept explicitly for round-trip serialisation consistency with
+#   MaterialDefinition.to_dict() and from_dict().
+#
+# ARCHITECTURAL DECISION — enabled flag per material:
+#   Setting enabled: false deactivates a material from sweep generation
+#   without deleting its definition.  Useful during debugging or when a
+#   material entry is being updated with new validated data.
+# ------------------------------------------------------------------------------
+
+materials:
+
+  # ----------------------------------------------------------------------------
+  # Ti-6Al-4V
+  # ----------------------------------------------------------------------------
+  # The most widely used titanium alloy for orthopedic implant applications.
+  # Property source: approximate values from open literature (ASM, Matweb,
+  # and ASTM F136 grade references).  Replace with validated lot-specific data
+  # before any decision-critical use.
+  # ----------------------------------------------------------------------------
+  Ti-6Al-4V:
+    name: Ti-6Al-4V
+    enabled: true
+    category: titanium_alloy
+    notes: >
+      Grade-5 titanium alloy (ASTM F136 implant grade where applicable).
+      Widely used in orthopaedic and trauma implants.  Properties listed are
+      approximate literature estimates for wrought/annealed condition.
+      Replace with validated test data before publication or regulatory use.
+
+    mechanical:
+      elastic_modulus_mpa: 113800.0     # MPa — Young's modulus (approx. 110–114 GPa range)
+      poissons_ratio: 0.342             # dimensionless — typical literature value
+      density_g_per_cm3: 4.43          # g/cm³
+      yield_strength_mpa: 880.0        # MPa — 0.2% proof stress, wrought annealed
+      ultimate_tensile_strength_mpa: 950.0  # MPa — UTS, wrought annealed
+
+    fatigue:
+      # ARCHITECTURAL DECISION — fatigue_limit_mpa is a placeholder:
+      #   Ti-6Al-4V does not exhibit a well-defined single endurance limit in
+      #   the way that steels do; fatigue strength is typically reported at
+      #   10^7 cycles for a given R-ratio and surface condition.  The value
+      #   below is a conservative approximation for preliminary proxy scoring
+      #   only.  Set fatigue_limit_is_placeholder: false only when replaced
+      #   with validated S-N data for the specific processing condition.
+      fatigue_limit_mpa: 500.0          # MPa — PLACEHOLDER; approx. R=-1, polished specimen
+      fatigue_limit_is_placeholder: true
+      sn_curve_available: false         # no S-N curve data loaded in version 1
+      # Goodman mean-stress correction is the most common correction for
+      # titanium implants but is not yet implemented in version 1.
+      mean_stress_correction: goodman_placeholder  # not yet applied; reserved for future version
+      notes: >
+        Fatigue limit is a provisional placeholder based on published high-cycle
+        fatigue strength estimates for polished Ti-6Al-4V at R = -1.  Actual
+        fatigue performance depends strongly on surface finish, build direction
+        (if additively manufactured), heat treatment, and test conditions.
+        This value feeds the fatigue-risk proxy score only and must not be
+        used as a design allowable.
+
+    # Thermal properties are not used in version-1 linear-elastic simulation.
+    # Included as a placeholder section for future thermal or coupled analyses.
+    thermal:
+      thermal_conductivity_w_per_mk: 6.7    # W/(m·K) — approximate literature value
+      specific_heat_j_per_kgk: 526.0        # J/(kg·K) — approximate
+      coefficient_thermal_expansion_per_k: 8.6e-6  # /K — approximate
+      thermal_properties_are_placeholder: true
+
+    simulation_defaults:
+      use_for_linear_elastic: true   # primary simulation mode in version 1
+      use_for_fatigue_proxy: true    # fatigue-risk proxy scoring enabled
+
+
+  # ----------------------------------------------------------------------------
+  # Ti-5Al-2.5Fe
+  # ----------------------------------------------------------------------------
+  # An alternative titanium alloy used in European orthopaedic implant practice.
+  # Has somewhat higher yield strength than Ti-6Al-4V in some conditions and
+  # is often considered for applications where vanadium avoidance is desired.
+  # Property source: approximate values from open literature.
+  # Replace with validated lot-specific data before any decision-critical use.
+  # ----------------------------------------------------------------------------
+  Ti-5Al-2.5Fe:
+    name: Ti-5Al-2.5Fe
+    enabled: true
+    category: titanium_alloy
+    notes: >
+      Titanium alloy used in European orthopaedic implant applications
+      (ISO 5832-10).  Vanadium-free; selected as a comparison candidate
+      alongside Ti-6Al-4V.  Properties listed are approximate literature
+      estimates for wrought condition.  Replace with validated test data
+      before publication or regulatory use.
+
+    mechanical:
+      elastic_modulus_mpa: 112000.0     # MPa — approximate; slightly lower than Ti-6Al-4V in some reports
+      poissons_ratio: 0.330             # dimensionless — approximate literature value
+      density_g_per_cm3: 4.45          # g/cm³ — slightly higher than Ti-6Al-4V
+      yield_strength_mpa: 820.0        # MPa — 0.2% proof stress, wrought condition
+      ultimate_tensile_strength_mpa: 900.0  # MPa — UTS, wrought condition
+
+    fatigue:
+      # ARCHITECTURAL DECISION — same placeholder approach as Ti-6Al-4V:
+      #   Ti-5Al-2.5Fe fatigue data is less broadly published than Ti-6Al-4V.
+      #   The value below is a conservative order-of-magnitude estimate only.
+      #   The fatigue-risk proxy module will flag this as low-confidence if
+      #   fatigue_limit_is_placeholder remains true.
+      fatigue_limit_mpa: 460.0          # MPa — PLACEHOLDER; conservative estimate
+      fatigue_limit_is_placeholder: true
+      sn_curve_available: false         # no S-N curve data loaded in version 1
+      mean_stress_correction: goodman_placeholder  # not yet applied; reserved for future version
+      notes: >
+        Fatigue limit is a provisional placeholder based on conservative
+        estimates from limited published data for Ti-5Al-2.5Fe.  Data for this
+        alloy is less widely available than for Ti-6Al-4V.  This value feeds
+        the fatigue-risk proxy score only and must not be used as a design
+        allowable.  Priority update: replace with validated lot-specific S-N
+        data if this material is selected as a primary candidate.
+
+    # Thermal placeholder — same rationale as Ti-6Al-4V entry above.
+    thermal:
+      thermal_conductivity_w_per_mk: 6.4    # W/(m·K) — approximate
+      specific_heat_j_per_kgk: 520.0        # J/(kg·K) — approximate
+      coefficient_thermal_expansion_per_k: 8.4e-6  # /K — approximate
+      thermal_properties_are_placeholder: true
+
+    simulation_defaults:
+      use_for_linear_elastic: true   # primary simulation mode in version 1
+      use_for_fatigue_proxy: true    # fatigue-risk proxy scoring enabled

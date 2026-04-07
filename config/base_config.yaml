@@ -1,0 +1,481 @@
+# ==============================================================================
+# config/base_config.yaml
+# ==============================================================================
+# Base configuration for the auxetic orthopedic plate pipeline.
+#
+# PURPOSE:
+#   This file defines global project settings, path conventions, geometry
+#   defaults, execution behaviour, solver selection, and top-level defaults
+#   that all other pipeline modules and config files complement.
+#
+# WHAT THIS FILE IS NOT:
+#   - It does not contain the full material library  -> see config/materials.yaml
+#   - It does not contain load case definitions      -> see config/loadcases.yaml
+#   - It does not contain parameter sweep ranges     -> see config/sweep_config.yaml
+#   - It does not contain meshing detail settings    -> see config/meshing.yaml
+#
+# ARCHITECTURAL DECISION — single base config, modular complements:
+#   Splitting configuration across focused files avoids a monolithic config
+#   blob and allows each concern (materials, sweep, meshing) to be edited
+#   independently.  This file is the one the config_loader reads first; all
+#   other config files extend or override specific sections.
+#
+# UNITS CONVENTION (enforced throughout):
+#   Length / displacement : mm
+#   Force                 : N
+#   Stress / modulus      : MPa
+#   Density               : g/cm³
+#   Angle                 : degrees
+# ==============================================================================
+
+
+# ------------------------------------------------------------------------------
+# 1. PROJECT
+# ------------------------------------------------------------------------------
+# Top-level project identity and version metadata.
+# ARCHITECTURAL DECISION — version field mirrors the v1 scope described in the
+# architecture spec so that config files can be validated against a known
+# schema version when the project evolves.
+# ------------------------------------------------------------------------------
+
+project:
+  project_name: auxetic_plate_pipeline
+  version: "1.0.0"
+  description: >
+    Modular staged engineering pipeline for parametric auxetic orthopedic
+    plate generation, meshing, FE simulation, postprocessing, fatigue-risk
+    proxy evaluation, and comparative reporting.  Version 1 covers three
+    auxetic unit-cell designs (re-entrant honeycomb, rotating square,
+    tetrachiral) assembled into a 5x3 planar lattice, extruded to a 3D plate,
+    and evaluated across multiple materials and load cases using CadQuery,
+    gmsh, and CalculiX.
+  author: placeholder  # Replace with team or individual name
+  # Designs in active scope for version 1.  Do not add designs here unless
+  # the corresponding geometry module, parameter class, and dispatch entry
+  # have all been implemented.
+  default_designs_in_scope:
+    - reentrant
+    - rotating_square
+    - tetrachiral
+
+
+# ------------------------------------------------------------------------------
+# 2. PATHS
+# ------------------------------------------------------------------------------
+# Relative paths from the project root to key directories and config files.
+#
+# ARCHITECTURAL DECISION — all paths relative to project root:
+#   Relative paths keep the project portable.  Downstream modules that need
+#   absolute paths should resolve them at runtime using their own __file__
+#   anchor or a configurable root override.  No absolute paths are hard-coded
+#   here.
+# ------------------------------------------------------------------------------
+
+paths:
+  # --- Input data ---
+  input_reference_step_dir:   data/input/reference_step
+  input_reference_notes_dir:  data/input/reference_notes
+
+  # --- Generated geometry artefacts ---
+  generated_unit_cells_dir:   data/generated/unit_cells_2d
+  generated_lattices_dir:     data/generated/lattices_2d
+  generated_solids_dir:       data/generated/solids_3d
+  generated_meshes_dir:       data/generated/meshes
+
+  # --- Pipeline run outputs ---
+  runs_dir:     runs
+  reports_dir:  reports
+
+  # --- Companion config files (relative to project root) ---
+  materials_config:  config/materials.yaml
+  loadcases_config:  config/loadcases.yaml
+  sweep_config:      config/sweep_config.yaml
+  meshing_config:    config/meshing.yaml
+
+
+# ------------------------------------------------------------------------------
+# 3. UNITS
+# ------------------------------------------------------------------------------
+# Explicit unit declarations for every physical quantity used in the pipeline.
+#
+# ARCHITECTURAL DECISION — units declared here, not scattered in code:
+#   Having a single authoritative units block prevents silent unit mismatches
+#   when modules are extended or when external tools (gmsh, CalculiX) use
+#   different conventions.  All field names in case_schema.py and all YAML
+#   configs encode the unit in the key name (e.g. force_n, stress_mpa) as
+#   an additional safeguard.
+# ------------------------------------------------------------------------------
+
+units:
+  length:   mm         # millimetres — all geometric dimensions
+  force:    N          # newtons — all applied loads
+  stress:   MPa        # megapascals — stresses, moduli, strength values
+  density:  g_per_cm3  # grams per cubic centimetre — material density
+  angle:    deg        # degrees — all angular parameters
+
+
+# ------------------------------------------------------------------------------
+# 4. GEOMETRY DEFAULTS
+# ------------------------------------------------------------------------------
+# Global geometry assumptions and design baseline parameters.
+#
+# ARCHITECTURAL DECISION — baseline parameters stored here for reference only:
+#   The canonical baseline values are embedded here so that config files and
+#   logs are self-documenting.  The geometry modules and case_schema.py
+#   dataclass defaults are the authoritative runtime values.  If a sweep
+#   overrides a parameter, the sweep value takes precedence over these
+#   baselines.
+# ------------------------------------------------------------------------------
+
+geometry_defaults:
+  # Core geometry strategy
+  geometry_mode: 2d_parametric_then_extrude  # Build 2D unit cell, tile, then extrude in Z
+  cell_size_definition: nominal_square_envelope  # cell_size = bounding square of one unit cell
+
+  # ARCHITECTURAL DECISION — STEP files are reference only:
+  #   The 3D STEP files in data/input/reference_step/ were provided as
+  #   dimensional references.  They are NOT the geometry engine for the
+  #   pipeline.  All geometry is generated parametrically from the values
+  #   in this config.
+  use_reference_step_as_geometry_engine: false
+
+  # Version 1 in-scope designs
+  supported_designs:
+    - reentrant
+    - rotating_square
+    - tetrachiral
+
+  # Placeholder list for future designs — do NOT implement until the
+  # geometry module, parameter class, and dispatch table are ready.
+  future_designs_placeholder:
+    - tri_antichiral   # deferred to a future version
+    - half_circle      # deferred to a future version
+
+  # Version 1 envelope constraints
+  # ARCHITECTURAL DECISION — raw tiled envelope only in version 1:
+  #   No outer anatomical bone-plate outline and no screw holes are added.
+  #   These features are explicitly deferred.  Flags are kept here so that
+  #   code can guard against them rather than silently ignoring them.
+  raw_tiled_auxetic_envelope_only: true
+  include_screw_holes: false          # out of scope for version 1
+  include_outer_plate_outline: false  # out of scope for version 1
+
+  # ------------------------------------------------------------------
+  # Design baseline parameters
+  # These are the reference starting-point values for each design.
+  # Sweep ranges in sweep_config.yaml define the actual parameter space.
+  # ------------------------------------------------------------------
+
+  reentrant_baseline:
+    cell_size: 7.85          # mm — nominal square envelope
+    wall_thickness: 1.5      # mm — full effective wall thickness
+    reentrant_angle_deg: 70.0  # degrees; valid range (0, 90)
+
+  rotating_square_baseline:
+    cell_size: 7.85           # mm — nominal square envelope
+    rotation_angle_deg: 22.5  # degrees; valid range (0, 45) for rotating-square topology
+    hinge_thickness: 0.40     # mm — hinge connector thickness (true geometry parameter)
+
+  tetrachiral_baseline:
+    cell_size: 7.85            # mm — nominal square envelope
+    node_radius: 1.05          # mm — radius of the chiral node circle
+    ligament_thickness: 1.05   # mm — thickness of connecting ligaments
+    # ARCHITECTURAL DECISION — fillet_radius is a derived parameter:
+    #   It is computed at runtime as: fillet_radius = 0.25 * (node_radius / 1.05)
+    #   The formula is documented here for reference; it must NOT be overridden
+    #   directly.  Changing node_radius automatically scales fillet_radius.
+    fillet_radius_formula: "0.25 * (node_radius / 1.05)"
+    fillet_radius_at_baseline: 0.25  # mm — value when node_radius = 1.05 mm
+
+
+# ------------------------------------------------------------------------------
+# 5. LATTICE DEFAULTS
+# ------------------------------------------------------------------------------
+# Controls how unit cells are tiled into the 5x3 planar lattice.
+#
+# ARCHITECTURAL DECISION — 5x3 fixed in version 1:
+#   repeats_x and repeats_y are stored here (not hard-coded in the geometry
+#   module) so that future versions supporting different lattice sizes can
+#   change this config entry without modifying module internals.
+# ------------------------------------------------------------------------------
+
+lattice_defaults:
+  repeats_x: 5  # number of unit cells in the X direction
+  repeats_y: 3  # number of unit cells in the Y direction
+
+  # Edge-to-edge tiling: unit cells are placed flush against each other with
+  # no added gap.  The auxetic topology itself defines the effective spacing.
+  spacing_mode: edge_to_edge_tiling
+
+  # The raw outer boundary of the tiled lattice is used as-is.  No trimming,
+  # rounding, or anatomical shaping is applied in version 1.
+  preserve_raw_outer_boundary: true
+
+
+# ------------------------------------------------------------------------------
+# 6. EXTRUSION DEFAULTS
+# ------------------------------------------------------------------------------
+# Controls the Z-axis extrusion that converts the 2D lattice to a 3D plate.
+#
+# ARCHITECTURAL DECISION — plate_thickness is the real sweep variable:
+#   The reference STEP files were extruded to 7.0 mm, but that value is
+#   reference geometry only.  The actual extrusion depth for every pipeline
+#   run is controlled by plate_thickness, which is swept via sweep_config.yaml.
+#   default_plate_thickness_mm is used when no sweep override is provided.
+# ------------------------------------------------------------------------------
+
+extrusion_defaults:
+  use_variable_plate_thickness: true  # plate_thickness is a sweep parameter
+  reference_step_extrusion_thickness_mm: 7.0  # reference only; not used by pipeline
+  default_plate_thickness_mm: 2.5     # mm — reasonable mid-range default
+  plate_thickness_units: mm
+
+
+# ------------------------------------------------------------------------------
+# 7. REFERENCE GEOMETRY
+# ------------------------------------------------------------------------------
+# File paths and notes for the 3 reference STEP files.
+#
+# ARCHITECTURAL DECISION — reference STEP files are documentation, not engine:
+#   These paths are provided so that the pipeline can optionally log or display
+#   a reference alongside generated geometry for visual sanity-checking.
+#   They play no role in the parametric geometry generation workflow.
+# ------------------------------------------------------------------------------
+
+reference_geometry:
+  note: >
+    These STEP files are dimensional reference artefacts only.
+    They are NOT used as the parametric geometry engine.
+    All geometry is generated from design parameters via CadQuery.
+
+  files:
+    reentrant:
+      path: data/input/reference_step/reentrant.step
+      reference_only: true
+      reference_extrusion_thickness_mm: 7.0
+
+    rotating_square:
+      path: data/input/reference_step/rotating_square.step
+      reference_only: true
+      reference_extrusion_thickness_mm: 7.0
+
+    tetrachiral:
+      path: data/input/reference_step/tetrachiral.step
+      reference_only: true
+      reference_extrusion_thickness_mm: 7.0
+
+
+# ------------------------------------------------------------------------------
+# 8. EXECUTION
+# ------------------------------------------------------------------------------
+# Global pipeline execution behaviour flags.
+#
+# ARCHITECTURAL DECISION — parallel execution disabled by default in version 1:
+#   The single-case execution model is validated and debuggable before
+#   parallelism is enabled.  Set parallel_execution_enabled: true only after
+#   the case runner and cache layer have been verified under concurrent load.
+#
+# ARCHITECTURAL DECISION — skip_completed_cases: true by default:
+#   The cache layer (workflow/cache.py) uses geometry and parameter hashes to
+#   detect already-completed cases.  Skipping them makes iterative development
+#   and partial re-runs fast without invalidating clean results.
+# ------------------------------------------------------------------------------
+
+execution:
+  single_case_runner_enabled: true   # one case = one design + material + load case + thickness
+  skip_completed_cases: true         # skip cases whose results already exist in cache
+  continue_on_case_failure: true     # a failed case does not abort the full sweep
+  enable_caching: true               # cache geometry and mesh hashes to avoid redundant work
+
+  log_level: INFO  # one of: DEBUG, INFO, WARNING, ERROR
+
+  # Artefact writing flags — disable selectively to speed up debug runs
+  write_case_metadata: true          # writes metadata.json per case
+  write_intermediate_geometry: true  # saves 2D unit cell and lattice files
+  write_mesh_files: true             # saves .msh files to runs/<case>/mesh/
+  write_solver_input_files: true     # saves CalculiX .inp files to runs/<case>/solver/
+
+  # Version 1: parallel execution is disabled pending validation of the
+  # single-case runner and cache layer under concurrent conditions.
+  parallel_execution_enabled: false
+
+
+# ------------------------------------------------------------------------------
+# 9. SOLVER
+# ------------------------------------------------------------------------------
+# Tool stack selection and solver behaviour flags.
+#
+# ARCHITECTURAL DECISION — export_solver_input_only: true by default:
+#   CalculiX may not be installed or licensed on every development environment.
+#   Defaulting to input-file export only keeps the pipeline runnable for
+#   geometry + mesh validation without a local CalculiX install.
+#   Set run_solver_by_default: true when the environment is confirmed.
+#
+# ARCHITECTURAL DECISION — three-point bending preferred in version 1:
+#   Three-point bending is implemented first because it has a simpler and
+#   more standardised boundary condition setup than four-point bending.
+#   Four-point support is reserved and the flag below signals to the load
+#   case module that it should be architectured to accommodate it.
+# ------------------------------------------------------------------------------
+
+solver:
+  # Selected tool stack (CadQuery + gmsh + CalculiX)
+  geometry_engine: cadquery
+  mesher: gmsh
+  solver_backend: calculix
+
+  # Solver run behaviour
+  # WARNING: set run_solver_by_default: true only on environments where
+  # CalculiX is installed and the input deck has been validated.
+  run_solver_by_default: false
+  export_solver_input_only: true   # generate .inp file without running ccx
+
+  # Bending mode
+  preferred_bending_mode: three_point  # three-point bending implemented first in version 1
+  support_future_four_point_bending: true  # architecture must accommodate this
+
+
+# ------------------------------------------------------------------------------
+# 10. FATIGUE PROXY
+# ------------------------------------------------------------------------------
+# Configuration for the fatigue-risk proxy evaluation.
+#
+# ARCHITECTURAL DECISION — proxy, not validated fatigue life:
+#   Version 1 does not implement a validated fatigue life solver (e.g. S-N
+#   curve integration, crack propagation).  The fatigue_risk_score output
+#   from fatigue_model.py is a defensible engineering proxy based on the
+#   ingredients listed below.  It must be labelled as a proxy in all reports.
+#   If a full fatigue solver is integrated in a future version, this section
+#   can be extended without changing the reporting schema.
+# ------------------------------------------------------------------------------
+
+fatigue_proxy:
+  enabled: true
+  mode: proxy  # NOT validated fatigue life prediction — proxy only
+
+  description: >
+    The fatigue-risk score is a dimensionless proxy in [0, 1] computed from
+    a combination of cyclic stress amplitude, maximum von Mises stress,
+    hotspot stress at auxetic nodes, and comparison against the material
+    fatigue limit (if available).  It is intended for comparative ranking
+    of designs only and must NOT be interpreted as a validated fatigue life
+    prediction or a regulatory compliance metric.
+
+  # Proxy ingredient flags — set to false to exclude a component from the score
+  ingredients:
+    max_stress: true               # peak von Mises stress in the model
+    cyclic_stress_amplitude: true  # half the stress range under cyclic loading
+    hotspot_stress: true           # localised peak stress at auxetic feature nodes
+    fatigue_limit_comparison: true # ratio of stress amplitude to material fatigue limit
+
+  use_material_fatigue_limit_if_available: true
+  # If the material's fatigue_limit_mpa is None (placeholder), the proxy
+  # will fall back to a fraction of yield strength and flag the result as
+  # low-confidence.
+  allow_placeholder_fatigue_limit: true
+  placeholder_fatigue_limit_fraction_of_yield: 0.5  # fallback: 50% of yield strength
+
+
+# ------------------------------------------------------------------------------
+# 11. REPORTING
+# ------------------------------------------------------------------------------
+# Controls which output files and plots are generated into reports/.
+# ------------------------------------------------------------------------------
+
+reporting:
+  # Tabular outputs
+  write_summary_csv: true            # all cases, all metrics, flat table
+  write_ranked_results_csv: true     # cases sorted by weighted ranking score
+  write_design_comparison_csv: true  # aggregated comparison across design types
+  write_filtered_candidates_csv: true  # top-N candidates after applying filters
+  write_json_case_results: true      # per-case JSON result files in runs/<case>/results/
+
+  # Plot generation
+  generate_plots: true
+
+  plots:
+    # One bar/box chart per metric, grouped by design type
+    modulus_by_design: true
+    max_stress_by_design: true
+    fatigue_metric_by_design: true
+    displacement_by_design: true
+    # Stress-strain curve overlays — generated only when solver data is available
+    stress_strain_curves: true
+
+
+# ------------------------------------------------------------------------------
+# 12. RANKING DEFAULTS
+# ------------------------------------------------------------------------------
+# Weighted scoring scaffold for comparative ranking of candidate designs.
+#
+# ARCHITECTURAL DECISION — conservative placeholder weights in version 1:
+#   Exact optimisation priorities for an orthopedic plate depend on clinical
+#   requirements not yet fixed at this stage of the project.  Placeholder
+#   weights are set to equal importance as a neutral starting point.
+#   These MUST be reviewed and adjusted by the engineer before interpreting
+#   ranked results as clinically meaningful.
+#
+# ARCHITECTURAL DECISION — lower score = better for all weighted metrics:
+#   Each weight is multiplied by the normalised metric value.  For metrics
+#   where a lower value is better (stress, fatigue risk, displacement), the
+#   pipeline uses the raw normalised value.  For metrics where a higher value
+#   is better (stiffness), the pipeline uses (1 - normalised value).
+#   This inversion is handled in ranking.py, not here.
+# ------------------------------------------------------------------------------
+
+ranking_defaults:
+  enabled: true
+  method: weighted_score  # sum of (weight * normalised_metric) for each metric
+
+  weights:
+    # Lower fatigue_risk_score is better (proxy; see fatigue_proxy section)
+    fatigue_risk: 0.30
+
+    # Lower max von Mises stress relative to yield is better
+    max_von_mises_stress: 0.30
+
+    # Higher effective stiffness may or may not be desired depending on
+    # clinical context — set conservatively equal here
+    effective_stiffness: 0.20
+
+    # Lower maximum displacement = stiffer plate; adjust based on target
+    # compliance requirements.  Not always better — see note above.
+    displacement: 0.20
+
+  # Normalisation strategy applied before weighting
+  # min_max: (value - min) / (max - min) across all cases in the sweep
+  normalisation: min_max
+
+  # Top N candidates to include in filtered_candidates report
+  top_n_candidates: 10
+
+
+# ------------------------------------------------------------------------------
+# 13. VALIDATION DEFAULTS
+# ------------------------------------------------------------------------------
+# Controls which geometry and parameter validation checks are run before each
+# pipeline stage.
+#
+# ARCHITECTURAL DECISION — strict_mode: false in version 1:
+#   Strict mode would halt the pipeline on any validation warning (not just
+#   errors).  Keeping it false allows exploratory sweeps to proceed even when
+#   some parameter combinations produce borderline geometry, while still
+#   logging the warnings.  Enable strict_mode: true for final production runs
+#   or when submitting results for review.
+# ------------------------------------------------------------------------------
+
+validation_defaults:
+  validate_design_parameters: true   # run dataclass validate() before geometry build
+  validate_geometry_nonempty: true   # check CadQuery solid is non-null after build
+  validate_positive_thickness: true  # plate_thickness > 0
+  validate_positive_cell_size: true  # cell_size > 0
+  validate_angles_in_reasonable_range: true  # angles within topology-specific bounds
+  validate_before_meshing: true      # re-validate geometry immediately before meshing
+
+  # Minimum feature size below which geometry is considered non-manufacturable.
+  # Used as a warning threshold; does not block execution unless strict_mode is on.
+  minimum_feature_size_mm: 0.20  # mm — conservative lower bound for titanium SLM processes
+
+  # Strict mode: treat validation warnings as errors and halt the pipeline.
+  # KEEP FALSE during development and exploratory sweeps.
+  strict_mode: false

@@ -1,0 +1,435 @@
+# ==============================================================================
+# config/meshing.yaml
+# ==============================================================================
+# gmsh meshing configuration for the auxetic orthopedic plate pipeline.
+#
+# PURPOSE:
+#   This file defines all gmsh meshing parameters consumed by
+#   src/simulation/mesher.py.  It controls global element sizing, meshing
+#   algorithm selection, optional feature-aware refinement rules, mesh quality
+#   thresholds, and export behaviour for the extruded 3D auxetic plate solids.
+#
+# RELATIONSHIP TO OTHER CONFIG FILES:
+#   - base_config.yaml      : references this file via paths.meshing_config
+#   - sweep_config.yaml     : staged_meshing preset names must match the
+#                             preset keys defined in the presets section below
+#   - loadcases.yaml / materials.yaml : independent; no mesh parameters there
+#
+# ARCHITECTURAL DECISION — meshing config as a standalone YAML:
+#   Mesh settings change independently from geometry parameters and material
+#   properties.  A dedicated file means mesh size can be adjusted for a run
+#   (e.g. switching from coarse to refined) without touching base_config.yaml
+#   or the design sweep.
+#
+# ARCHITECTURAL DECISION — static configuration with optional feature rules:
+#   Version 1 does not implement adaptive error-estimation meshing loops.
+#   Instead, a robust static global size range is set, with optional
+#   feature-aware size targets for known thin regions (ligaments, hinges,
+#   tetrachiral nodes).  The mesher module applies these targets where
+#   feasible using gmsh field-based refinement; it does not guarantee sub-
+#   element adaptive remeshing.
+#
+# GEOMETRY CONTEXT:
+#   - 3D solid: extruded 5x3 auxetic lattice, plate_thickness in Z
+#   - Thin features: re-entrant walls (~1.0–2.5 mm), rotating-square hinges
+#     (~0.30–1.0 mm), tetrachiral ligaments (~0.80–1.50 mm) and node circles
+#   - No screw holes; no anatomical plate outline
+#   - Raw tiled auxetic envelope only
+#   - Thinnest expected feature: hinge_thickness as low as 0.30 mm
+#
+# UNITS CONVENTION (consistent with base_config.yaml and case_schema.py):
+#   Length / size : mm
+# ==============================================================================
+
+
+# ------------------------------------------------------------------------------
+# 1. METADATA
+# ------------------------------------------------------------------------------
+
+metadata:
+  config_name: auxetic_plate_meshing_config
+  version: "1.0.0"
+  description: >
+    Version-1 gmsh meshing configuration for extruded auxetic plate parametric
+    studies.  Supports coarse, default, and refined presets for re-entrant
+    honeycomb, rotating square, and tetrachiral 3D plate geometries.
+
+  notes:
+    - >
+      Version 1 prioritises robust exploratory meshing using static global
+      size parameters with optional feature-aware field refinement.  No
+      adaptive error-estimation or remeshing loops are implemented.
+    - >
+      Global characteristic length bounds plus optional feature refinement
+      rules are the preferred approach over complex adaptive meshing, which
+      requires solver feedback not available until later pipeline stages.
+    - >
+      Refinement settings around thin ligaments and hinges may need manual
+      tuning for extreme parameter combinations (e.g. hinge_thickness = 0.30 mm
+      with coarse preset).  Review mesh element counts and aspect ratios in the
+      quality_controls output before accepting a mesh for simulation.
+    - >
+      No screw-hole refinement rules are included; screw holes are out of
+      scope for version 1.  No anatomical plate outline refinement rules
+      are included for the same reason.
+
+
+# ------------------------------------------------------------------------------
+# 2. BACKEND
+# ------------------------------------------------------------------------------
+# Tool and dimensionality configuration.
+#
+# ARCHITECTURAL DECISION — tetrahedral volume meshing as default:
+#   Tetrahedral meshes (TET4 / TET10) are robust for complex curved geometries
+#   such as auxetic lattices with thin features and curved node boundaries.
+#   Hexahedral meshing (HEX8) can improve solver accuracy for regular geometries
+#   but is significantly harder to automate for arbitrary auxetic topologies.
+#   Hex meshing is deferred to a future version pending geometry stability.
+#
+# ARCHITECTURAL DECISION — target_dimension: 3:
+#   The mesher always produces a 3D volume mesh from the extruded solid.
+#   2D surface-only meshing is an intermediate step within gmsh but is not
+#   the deliverable consumed by the CalculiX solver exporter.
+# ------------------------------------------------------------------------------
+
+backend:
+  mesher: gmsh                      # must match solver.mesher in base_config.yaml
+  target_dimension: 3               # produce a 3D volume mesh
+  generate_volume_mesh: true
+
+  # ARCHITECTURAL DECISION — tetrahedral by default; hex reserved for future:
+  preferred_element_family: tetrahedral
+
+  # Hex meshing is architecturally reserved but not implemented in version 1.
+  allow_future_hex_meshing: false
+
+
+# ------------------------------------------------------------------------------
+# 3. GLOBAL DEFAULTS
+# ------------------------------------------------------------------------------
+# Global gmsh parameters applied when no preset overrides them.
+#
+# ARCHITECTURAL DECISION — algorithm selection:
+#   2D: Frontal-Delaunay (algorithm 6) is robust for thin-walled geometries
+#       and produces better element quality near small features than the
+#       default Delaunay (algorithm 5) for the cell sizes used here.
+#   3D: Frontal (algorithm 4) is the preferred gmsh 3D algorithm for complex
+#       extruded geometries; it respects surface mesh topology more faithfully
+#       than Delaunay-based 3D algorithms for thin-plate solids.
+#
+# ARCHITECTURAL DECISION — mesh_order: 1 (linear elements) in version 1:
+#   Linear tetrahedral elements (TET4) are the safest default for CalculiX
+#   compatibility and exploratory studies.  Second-order elements (TET10)
+#   improve accuracy for curved boundaries but increase node count and solve
+#   time.  second_order_linearized: false is kept as a reminder that if
+#   mesh_order is changed to 2, linearization must be explicitly configured.
+#
+# ARCHITECTURAL DECISION — characteristic_length bounds chosen for thin features:
+#   The thinnest version-1 feature is a rotating-square hinge at 0.30 mm.
+#   A minimum element size of 0.15 mm gives ~2 elements across the thinnest
+#   hinge without producing absurdly large meshes.  The maximum of 1.0 mm
+#   keeps element count manageable for the 5x3 lattice while still resolving
+#   wall-scale geometry (~1.0–2.5 mm walls).
+#   These values are the global defaults; presets override them.
+# ------------------------------------------------------------------------------
+
+global_defaults:
+  # gmsh 2D meshing algorithm
+  # 1=Delaunay, 5=Delaunay(robust), 6=Frontal-Delaunay, 8=Delaunay for quads
+  mesh_algorithm_2d: 6              # Frontal-Delaunay — best for thin features
+
+  # gmsh 3D meshing algorithm
+  # 1=Delaunay, 2=New Delaunay, 4=Frontal, 7=MMG3D, 10=HXT
+  mesh_algorithm_3d: 4              # Frontal — robust for extruded auxetic solids
+
+  # Global characteristic length bounds (mm)
+  # The mesher uses these as fallback when no field-based refinement applies.
+  characteristic_length_min_mm: 0.15   # mm — set to resolve thinnest hinge features
+  characteristic_length_max_mm: 1.0    # mm — keeps mesh count manageable for 5x3 lattice
+
+  # Geometry tolerance for degenerate edge/surface detection
+  geometry_tolerance_mm: 0.001        # mm — conservative tolerance for CadQuery-generated solids
+
+  # Mesh optimisation and smoothing
+  optimize_mesh: true                  # run Netgen/Laplacian optimisation after mesh generation
+  smoothing_steps: 5                   # Laplacian smoothing iterations; 5 is a balanced default
+
+  # Surface recombination (quad/hex faces) — disabled for tetrahedral-only workflow
+  recombine_surfaces: false            # must remain false while allow_future_hex_meshing: false
+
+  # Element order
+  # ARCHITECTURAL DECISION — linear elements by default (see note above)
+  mesh_order: 1                        # 1 = linear (TET4); 2 = quadratic (TET10)
+  second_order_linearized: false       # only relevant if mesh_order: 2 is used
+
+
+# ------------------------------------------------------------------------------
+# 4. PRESETS
+# ------------------------------------------------------------------------------
+# Named mesh size presets for different workflow stages.
+#
+# ARCHITECTURAL DECISION — three presets map to three workflow stages:
+#   coarse   → stage 1 geometry validation and fast structural screening
+#   default  → stage 2 standard parametric study runs
+#   refined  → stage 3 final candidate comparison with higher mesh fidelity
+#
+# Preset values override global_defaults when the preset is active.
+# The active preset is selected by staged_meshing section entries or by a
+# per-case override (allow_preset_override_per_case: true in staged_meshing).
+#
+# ARCHITECTURAL DECISION — refined preset is meaningfully finer, not extreme:
+#   The goal of the refined preset is to reduce discretisation error at thin
+#   feature boundaries, not to produce a publication-grade mesh for a single
+#   geometry.  Keeping element size reasonable avoids solver run times that
+#   are disproportionate to version-1 comparative study objectives.
+# ------------------------------------------------------------------------------
+
+presets:
+
+  coarse:
+    # Fast screening mesh — geometry validation and coarse structural ranking.
+    # Not suitable for final quantitative stress comparisons.
+    characteristic_length_min_mm: 0.25   # mm — coarser minimum; may miss thinnest hinges
+    characteristic_length_max_mm: 1.5    # mm — larger maximum; fewer elements overall
+    mesh_order: 1
+    smoothing_steps: 3
+    optimize_mesh: true
+    notes: >
+      Coarse preset is intended for stage-1 geometry validation and fast
+      structural screening only.  Thin features (hinges < 0.40 mm) may be
+      poorly resolved at this size.  Do not use coarse meshes for final
+      quantitative stress or fatigue proxy comparisons.
+
+  default:
+    # Balanced mesh — normal parametric study runs.
+    # Resolves main structural features without excessive element count.
+    characteristic_length_min_mm: 0.15   # mm — matches global_defaults
+    characteristic_length_max_mm: 1.0    # mm — matches global_defaults
+    mesh_order: 1
+    smoothing_steps: 5
+    optimize_mesh: true
+    notes: >
+      Default preset is the standard version-1 working configuration.
+      Suitable for all three designs at their baseline and typical swept
+      parameter values.  Provides a good balance between mesh fidelity and
+      computational cost for comparative parametric studies.
+
+  refined:
+    # Higher-fidelity mesh — final candidate comparison runs.
+    # Produces more elements at thin features and curvature-rich boundaries.
+    characteristic_length_min_mm: 0.10   # mm — smaller minimum for thin hinges and nodes
+    characteristic_length_max_mm: 0.70   # mm — finer maximum for better stress resolution
+    mesh_order: 1
+    smoothing_steps: 8
+    optimize_mesh: true
+    notes: >
+      Refined preset is intended for final comparison of top-ranked candidates
+      identified from earlier stages.  Higher element count increases solve
+      time; use selectively on the parameter combinations that matter most.
+      Still uses linear TET4 elements; upgrade to mesh_order: 2 for
+      quadratic accuracy if solver and postprocessor support is confirmed.
+
+
+# ------------------------------------------------------------------------------
+# 5. FEATURE REFINEMENT
+# ------------------------------------------------------------------------------
+# Optional feature-aware element size targets for thin and curved regions.
+#
+# ARCHITECTURAL DECISION — field-based refinement targets, not fully automatic:
+#   These entries define target element sizes for known critical regions.
+#   The mesher module (mesher.py) applies them using gmsh Distance + Threshold
+#   fields where the geometry module can provide anchor points or surface tags.
+#   This is NOT a fully automatic adaptive refinement system — it relies on
+#   the mesher module being able to identify the target surfaces or edges from
+#   the CadQuery geometry.  If automatic identification fails, the mesher
+#   falls back to global_defaults sizing and logs a warning.
+#
+# ARCHITECTURAL DECISION — feature refinement disabled in stage 1 (coarse):
+#   Field-based refinement adds meshing overhead and complexity.  For stage-1
+#   geometry validation, global coarse sizing is sufficient.  Refinement is
+#   enabled from stage 2 onwards (see staged_meshing section).
+# ------------------------------------------------------------------------------
+
+feature_refinement:
+  enabled: true
+  use_geometry_based_refinement: true  # use gmsh Distance/Threshold fields where feasible
+
+  targets:
+
+    thin_ligaments:
+      # Applies to re-entrant honeycomb walls and tetrachiral connecting arms.
+      # These are the primary load-bearing thin members across all three designs.
+      enabled: true
+      target_element_size_mm: 0.20       # mm — target at ligament/wall surfaces
+      trigger_dimension_threshold_mm: 1.5  # mm — apply refinement when feature width < this
+      notes: >
+        Targets re-entrant honeycomb wall cross-sections and tetrachiral ligament
+        arms.  trigger_dimension_threshold_mm is compared against local feature
+        width detected from geometry tags.  Falls back to default global size
+        if surface identification is not feasible for a given geometry.
+
+    hinges:
+      # Applies specifically to rotating-square hinge connectors.
+      # These are the thinnest features in the rotating-square design
+      # (hinge_thickness as low as 0.30 mm in the sweep range).
+      enabled: true
+      target_element_size_mm: 0.12       # mm — fine enough for 2–3 elements across 0.30 mm hinge
+      trigger_dimension_threshold_mm: 0.80  # mm — apply when hinge feature width < this
+      notes: >
+        Targets rotating-square hinge connectors.  At minimum sweep hinge
+        thickness (0.30 mm), the target size of 0.12 mm gives approximately
+        2–3 elements across the hinge cross-section.  If automatic hinge surface
+        detection fails, the mesher logs a warning and falls back to default
+        global sizing.  Review aspect ratio in quality_controls output.
+
+    tetrachiral_nodes:
+      # Applies to the circular node regions and ligament-to-node junctions
+      # in the tetrachiral design.  High curvature at the tangency point
+      # benefits from local refinement.
+      enabled: true
+      target_element_size_mm: 0.15       # mm — resolves node radius curvature
+      trigger_dimension_threshold_mm: 2.5  # mm — apply within this radius of node centre
+      notes: >
+        Targets tetrachiral hub circle boundaries and ligament attachment
+        tangency points.  High curvature at these junctions is a likely stress
+        concentration site for fatigue proxy evaluation; adequate resolution
+        here improves hotspot_stress_mpa extraction accuracy.
+
+    high_curvature_regions:
+      # General high-curvature catch-all applied by gmsh curvature-adaptive
+      # sizing if available.  Acts as a fallback for any curved feature not
+      # captured by the specific targets above.
+      enabled: true
+      target_element_size_mm: 0.18       # mm — moderate refinement at curvature
+      # gmsh curvature-based sizing parameter (MeshSizeFromCurvature in gmsh API)
+      min_elements_per_2pi_radians: 12   # minimum elements to resolve a full circle
+      notes: >
+        General curvature-adaptive catch-all using gmsh MeshSizeFromCurvature.
+        Supplements the specific feature targets above.  Applied globally to
+        all curved edges and surfaces in the model.
+
+
+# ------------------------------------------------------------------------------
+# 6. QUALITY CONTROLS
+# ------------------------------------------------------------------------------
+# Post-meshing validation thresholds.
+#
+# ARCHITECTURAL DECISION — fail_on_quality_violation: false in version 1:
+#   Hard-failing on any quality violation would abort parametric sweep cases
+#   for marginal parameter combinations (e.g. very thin hinges at coarse
+#   preset).  Instead, violations are logged and flagged in case metadata so
+#   the postprocessor and ranking modules can downweight or exclude low-quality
+#   meshes during analysis.  Enable fail_on_quality_violation: true for
+#   production final-comparison runs where mesh quality assurance is critical.
+#
+# ARCHITECTURAL DECISION — element count thresholds as warnings, not hard limits:
+#   These bounds help catch degenerate meshes (too few elements → coarse or
+#   failed mesh) and unexpectedly large meshes (too many elements → fine
+#   parameter combination at refined preset) without aborting the sweep.
+# ------------------------------------------------------------------------------
+
+quality_controls:
+  validate_after_meshing: true
+
+  # Element count bounds — warnings only (not hard failures unless
+  # fail_on_quality_violation: true is set)
+  minimum_element_count_warning: 500     # fewer than this likely indicates a degenerate mesh
+  maximum_element_count_warning: 500000  # more than this may indicate unintended over-refinement
+
+  # Structural checks
+  check_for_empty_mesh: true              # fail if meshing produces zero elements
+  check_for_nonpositive_volume_elements: true  # flag inverted or zero-volume tetrahedra
+
+  # Aspect ratio check (ratio of longest to shortest element edge)
+  check_aspect_ratio: true
+  max_recommended_aspect_ratio: 20.0     # elements with AR > 20 flagged as potentially problematic
+  #                                        NOTE: thin features naturally produce higher AR elements;
+  #                                        this threshold is a warning guide, not a strict limit.
+
+  # ARCHITECTURAL DECISION — soft failure mode for version-1 exploratory sweeps:
+  # See note above.  Set to true for final production comparison runs.
+  fail_on_quality_violation: false
+
+
+# ------------------------------------------------------------------------------
+# 7. EXPORT
+# ------------------------------------------------------------------------------
+# Mesh file export behaviour consumed by mesher.py and solver_exporter.py.
+#
+# ARCHITECTURAL DECISION — write both .msh and .vtk:
+#   .msh is the native gmsh format consumed by the CalculiX export path.
+#   .vtk is written for debug visualisation in ParaView without requiring
+#   a full solver run.  The overhead is small compared to mesh generation.
+#
+# ARCHITECTURAL DECISION — write_inp_compatible_intermediate: true:
+#   This flag signals the mesher to preserve node/element numbering and
+#   physical group labels in a form that solver_exporter.py can map directly
+#   to CalculiX *NODE, *ELEMENT, and *NSET / *ELSET blocks without a
+#   renumbering step.  If this causes issues with a specific gmsh version,
+#   it can be disabled and the exporter must handle renumbering.
+#
+# ARCHITECTURAL DECISION — preserve_physical_groups: true:
+#   gmsh physical groups (surfaces, volumes) carry the boundary condition
+#   anchor points that solver_exporter.py needs to assign *BOUNDARY and
+#   *CLOAD entries correctly.  Without them, the exporter cannot reliably
+#   identify load and fixed faces from the mesh alone.
+# ------------------------------------------------------------------------------
+
+export:
+  write_msh: true                        # gmsh .msh format — primary solver input
+  write_vtk: true                        # VTK format — debug visualisation in ParaView
+  write_inp_compatible_intermediate: true  # preserve numbering/groups for CalculiX export
+  preserve_physical_groups: true          # required for BC assignment in solver_exporter.py
+  include_metadata_json: true            # write a companion JSON with mesh stats per case
+
+  # gmsh .msh format version
+  # Version 4.1 is the current gmsh native format; version 2.2 has broader
+  # compatibility with older CalculiX converters.
+  # ARCHITECTURAL DECISION — default to 2.2 for maximum CalculiX compatibility:
+  #   gmsh MSH4 requires a converter step for many CalculiX workflows.
+  #   MSH2 is directly readable by most open-source FE pre/postprocessors.
+  #   Switch to 4.1 if the CalculiX workflow is confirmed to handle MSH4.
+  gmsh_format_version: "2.2"             # "2.2" for broad CalculiX compatibility; "4.1" for gmsh-native
+
+  # Output filename convention
+  # Resolved at runtime by mesher.py relative to the case mesh directory.
+  # Example resolved path: runs/case_000001/mesh/model.msh
+  output_naming_convention:
+    mesh_file_stem: model               # base filename without extension
+    metadata_file_stem: mesh_metadata   # companion JSON filename stem
+
+
+# ------------------------------------------------------------------------------
+# 8. STAGED MESHING
+# ------------------------------------------------------------------------------
+# Maps pipeline execution stages (from sweep_config.yaml staged_execution) to
+# mesh presets and refinement rule activation.
+#
+# ARCHITECTURAL DECISION — coarser mesh for stage 1, finer for later stages:
+#   Stage 1 is about geometry validation and fast coarse screening.  Using the
+#   coarse preset here avoids spending mesh generation time on parameter
+#   combinations that may be geometrically invalid or structurally uninteresting.
+#   The investment in refined meshing is deferred to stages 2 and 3 where the
+#   case set has been filtered down to serious candidates.
+#
+# ARCHITECTURAL DECISION — feature refinement disabled in stage 1:
+#   Feature-aware field refinement adds gmsh API setup overhead and may fail
+#   for extreme parameter combinations (very thin hinges at coarse sizing).
+#   Disabling it in stage 1 keeps the meshing robust during geometry exploration.
+#   From stage 2 onwards, refinement rules are activated for more meaningful
+#   stress and fatigue proxy comparisons.
+# ------------------------------------------------------------------------------
+
+staged_meshing:
+  # Preset assigned to each execution stage (must match preset keys above)
+  stage_1_preset: coarse    # geometry validation and fast coarse screen
+  stage_2_preset: default   # expanded structural comparison
+  stage_3_preset: refined   # fatigue proxy evaluation on top candidates
+
+  # Allow an individual case to override the stage preset via its case_config.yaml
+  allow_preset_override_per_case: true
+
+  # Feature refinement activation per stage (see feature_refinement section)
+  use_refinement_rules_in_stage_1: false  # disabled for robustness during geometry exploration
+  use_refinement_rules_in_stage_2: true   # enabled for structural accuracy in expanded screen
+  use_refinement_rules_in_stage_3: true   # enabled for stress/hotspot accuracy in fatigue proxy screen

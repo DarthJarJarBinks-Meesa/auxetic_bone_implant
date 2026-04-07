@@ -1,0 +1,389 @@
+# ==============================================================================
+# config/loadcases.yaml
+# ==============================================================================
+# Structural load case library for the auxetic orthopedic plate pipeline.
+#
+# PURPOSE:
+#   This file is the single source of truth for load case definitions used by
+#   the simulation, solver-export, and fatigue-proxy modules.  It is loaded by
+#   src/simulation/loadcases.py into typed LoadCaseDefinition dataclasses.
+#
+# RELATIONSHIP TO OTHER CONFIG FILES:
+#   - base_config.yaml sets preferred_bending_mode and references this file
+#   - sweep_config.yaml references load case keys from this file by name
+#   - materials.yaml is independent; material assignment is handled separately
+#
+# ARCHITECTURAL DECISION — load case library as a standalone YAML:
+#   Separating load case definitions from base_config.yaml means force
+#   magnitudes, BCs, and cyclic parameters can be edited without touching
+#   global project settings.  The loader in loadcases.py validates each entry
+#   against the LoadCaseDefinition schema and raises clearly on missing keys.
+#
+# ARCHITECTURAL DECISION — descriptive BC labels, not solver syntax:
+#   Boundary condition labels (boundary_condition_label) are human-readable
+#   descriptors, not CalculiX *BOUNDARY syntax.  Translation to solver syntax
+#   is the responsibility of src/simulation/solver_exporter.py.  Keeping YAML
+#   BC descriptions solver-agnostic means the config file stays valid if the
+#   solver backend changes in a future version.
+#
+# !! IMPORTANT — VERSION 1 CONSTRAINTS !!
+#   - No screw holes; no anatomical plate outline
+#   - Raw tiled auxetic envelope only
+#   - Three-point bending is implemented first; four-point is a future placeholder
+#   - Cyclic loading produces a fatigue-risk proxy score only — NOT validated
+#     fatigue life prediction
+#
+# UNITS CONVENTION (consistent with base_config.yaml and case_schema.py):
+#   Force         : N
+#   Displacement  : mm
+#   Angle         : degrees
+#   Frequency     : Hz
+#   Cycles        : count (dimensionless integer)
+# ==============================================================================
+
+
+# ------------------------------------------------------------------------------
+# 1. METADATA
+# ------------------------------------------------------------------------------
+
+metadata:
+  library_name: auxetic_plate_loadcase_library
+  version: "1.0.0"
+  description: >
+    Version-1 structural load case library for the auxetic orthopedic plate
+    pipeline.  Defines axial compression, axial tension, three-point bending,
+    and cyclic/fatigue-proxy load cases for comparative parametric simulation
+    of re-entrant honeycomb, rotating square, and tetrachiral plate designs.
+
+  notes:
+    - >
+      These load cases are initial engineering configurations for comparative
+      simulation screening.  Force magnitudes and boundary conditions are
+      representative of orthopedic plate loading scenarios but are not
+      validated against a specific clinical device or test standard.
+    - >
+      Boundary condition descriptions are abstract labels interpreted by
+      src/simulation/solver_exporter.py.  They are not solver-specific syntax.
+      Exact BC implementation may evolve as the solver export module matures.
+    - >
+      Cyclic loading (cyclic_proxy) is represented by a fatigue-risk proxy
+      workflow.  It does NOT perform validated fatigue-life modelling (S-N
+      curve integration, crack initiation/propagation).  The resulting
+      fatigue_risk_score is a dimensionless comparative proxy only and must
+      not be interpreted as a fatigue design allowable or regulatory metric.
+    - >
+      All force values are editable placeholders.  Replace with validated test
+      magnitudes derived from biomechanical literature or device standards
+      before any publication or decision-critical use.
+
+
+# ------------------------------------------------------------------------------
+# 2. UNITS
+# ------------------------------------------------------------------------------
+# Explicit unit declarations for all physical quantities in this file.
+# Must remain consistent with base_config.yaml and case_schema.py.
+# ------------------------------------------------------------------------------
+
+units:
+  force:       N      # newtons — all force magnitudes
+  displacement: mm    # millimetres — all displacement references
+  angle:       deg    # degrees
+  frequency:   Hz     # hertz — cyclic loading frequency
+  cycles:      count  # dimensionless integer cycle count
+
+
+# ------------------------------------------------------------------------------
+# 3. DEFAULTS
+# ------------------------------------------------------------------------------
+# Global default values used when a specific load case does not override them.
+# These are also the values used by sweep_config.yaml when a single-value
+# (non-swept) load case is referenced.
+#
+# ARCHITECTURAL DECISION — defaults block separate from loadcases block:
+#   Storing defaults here avoids repeating the same values in every load case
+#   entry and makes it easy to adjust the global starting point without
+#   editing each case individually.  Individual load case entries override
+#   these defaults where needed.
+#
+# Force range guidance from architecture spec:
+#   Compression : 1000 – 1500 N  →  default chosen at 1200 N (mid-range)
+#   Tension     : 300  – 400 N   →  default chosen at 350 N  (mid-range)
+# ------------------------------------------------------------------------------
+
+defaults:
+  # Load cases enabled by default in a sweep (keys match loadcases section below)
+  default_enabled_loadcases:
+    - axial_compression
+    - axial_tension
+    - bending_three_point
+    - cyclic_proxy
+
+  # Bending mode selection
+  # ARCHITECTURAL DECISION — three_point is the v1 default:
+  #   Three-point bending has a simpler, more standardised idealised BC setup.
+  #   Four-point support is reserved for a future version (see future_placeholders).
+  preferred_bending_mode: three_point
+  support_future_four_point_bending: true
+
+  # Default force magnitudes — all editable
+  default_compression_force_n: 1200.0   # N — mid-range of 1000–1500 N guidance
+  default_tension_force_n: 350.0        # N — mid-range of 300–400 N guidance
+
+  # Cyclic proxy defaults
+  # ARCHITECTURAL DECISION — mean and amplitude chosen conservatively:
+  #   mean_force = 0.5 × default compression (compressive-dominant cycling)
+  #   amplitude  = 0.3 × mean (moderate cyclic ratio for screening)
+  #   These are screening-level placeholders; R-ratio and waveform shape are
+  #   not modelled in version 1.
+  default_cyclic_mean_force_n: 600.0      # N — compressive mean, placeholder
+  default_cyclic_amplitude_force_n: 180.0 # N — cyclic amplitude, placeholder
+  default_cycle_count: 1000000            # 10^6 cycles — conventional HCF reference count
+  #                                         (used for proxy normalisation only;
+  #                                          NOT a validated fatigue-life test parameter)
+  default_frequency_hz: 2.0              # Hz — representative walking gait frequency
+
+
+# ------------------------------------------------------------------------------
+# 4. LOAD CASES
+# ------------------------------------------------------------------------------
+# One entry per version-1 load case.
+#
+# ARCHITECTURAL DECISION — load cases as a mapping keyed by case name:
+#   Using string keys (axial_compression, etc.) rather than a list allows
+#   any module to look up a case by name directly.  The name field inside
+#   each entry is kept explicitly for round-trip serialisation consistency
+#   with LoadCaseDefinition.to_dict() and from_dict().
+#
+# Field conventions:
+#   load_case_type          : must match a LoadCaseType enum value in case_schema.py
+#   force_n                 : scalar magnitude in N (sign convention is
+#                             resolved in solver_exporter.py, not here)
+#   boundary_condition_label: human-readable descriptor → resolved to solver
+#                             syntax in src/simulation/solver_exporter.py
+#   metadata                : open dict for load-case-specific extras consumed
+#                             by the loadcases.py builder
+# ------------------------------------------------------------------------------
+
+loadcases:
+
+  # ----------------------------------------------------------------------------
+  # Axial Compression
+  # ----------------------------------------------------------------------------
+  # Represents compressive loading along the plate's primary axial direction.
+  # Representative of plate bearing load during fracture healing under body weight.
+  #
+  # ARCHITECTURAL DECISION — force_n is a positive magnitude here:
+  #   Sign convention (compression = negative displacement / force direction)
+  #   is applied by solver_exporter.py when building the CalculiX *CLOAD or
+  #   *BOUNDARY step, not in the YAML.  Keeping force_n positive in config
+  #   avoids sign confusion when reading the file.
+  # ----------------------------------------------------------------------------
+  axial_compression:
+    enabled: true
+    load_case_type: axial_compression   # must match LoadCaseType.AXIAL_COMPRESSION
+    name: Axial Compression — 1200 N
+    description: >
+      Uniaxial compressive load applied to one end face of the plate along the
+      primary longitudinal (X) axis.  Opposite end face is fully fixed.
+      Representative of compressive loading in a long-bone fracture fixation
+      scenario.  Version-1 idealised setup; no anatomical plate geometry.
+    force_n: 1200.0                               # N — see defaults for range rationale
+    boundary_condition_label: axial_end_fixed_opposing_end_loaded
+    loading_direction: negative_x                 # compression applied in -X direction
+    metadata:
+      load_application_region: end_face_positive_x
+      fixed_region: end_face_negative_x
+      loading_type: surface_pressure_or_force     # resolved to CalculiX *CLOAD by exporter
+      proxy_only: false
+
+
+  # ----------------------------------------------------------------------------
+  # Axial Tension
+  # ----------------------------------------------------------------------------
+  # Represents tensile loading along the plate's primary axial direction.
+  # Representative of distractive forces or bending-induced tension on the
+  # tensile side of a plate under physiological loading.
+  # ----------------------------------------------------------------------------
+  axial_tension:
+    enabled: true
+    load_case_type: axial_tension       # must match LoadCaseType.AXIAL_TENSION
+    name: Axial Tension — 350 N
+    description: >
+      Uniaxial tensile load applied to one end face of the plate along the
+      primary longitudinal (X) axis.  Opposite end face is fully fixed.
+      Representative of distraction forces or tension-side loading in a
+      fracture fixation plate.  Version-1 idealised setup.
+    force_n: 350.0                                # N — see defaults for range rationale
+    boundary_condition_label: axial_end_fixed_opposing_end_loaded
+    loading_direction: positive_x                 # tension applied in +X direction
+    metadata:
+      load_application_region: end_face_positive_x
+      fixed_region: end_face_negative_x
+      loading_type: surface_pressure_or_force
+      proxy_only: false
+
+
+  # ----------------------------------------------------------------------------
+  # Three-Point Bending
+  # ----------------------------------------------------------------------------
+  # Represents transverse bending of the plate under a central concentrated load
+  # with two outer supports.  Standard idealised bending test configuration.
+  #
+  # ARCHITECTURAL DECISION — abstract support span, not anatomical geometry:
+  #   Version 1 uses the raw tiled auxetic envelope with no anatomical plate
+  #   outline and no screw holes.  Absolute support positions are therefore
+  #   defined as fractions of the plate's total length rather than as fixed
+  #   coordinates.  The solver_exporter.py module computes actual node
+  #   coordinates from the mesh geometry and these fractional parameters.
+  #
+  # ARCHITECTURAL DECISION — force_n for bending is the central applied load:
+  #   For three-point bending, force_n is the magnitude of the single central
+  #   point load.  Reaction forces at supports are computed by the solver.
+  # ----------------------------------------------------------------------------
+  bending_three_point:
+    enabled: true
+    load_case_type: bending             # must match LoadCaseType.BENDING
+    name: Three-Point Bending — 1200 N
+    description: >
+      Three-point bending configuration with two outer simple supports and a
+      single central transverse load.  Version-1 idealised setup using the raw
+      tiled auxetic plate envelope.  Support positions are defined as fractions
+      of total plate length.  No anatomical geometry or screw hole effects.
+    force_n: 1200.0                               # N — central applied load magnitude
+    boundary_condition_label: three_point_bending_idealized
+    loading_direction: negative_z                 # transverse load applied in -Z direction
+
+    # ARCHITECTURAL DECISION — support_span_mode: symmetric_outer_thirds:
+    #   Placing supports at the outer third-points of the plate length is a
+    #   common idealised three-point bending convention that avoids edge effects
+    #   while maximising the bending moment at midspan.  This can be overridden
+    #   per case in sweep_config.yaml if a different span fraction is needed.
+    support_span_mode: symmetric_outer_thirds
+
+    metadata:
+      load_application_region: midspan_centroid   # central load at 50% of plate length
+      load_at_midspan: true
+      fixed_region: none                          # supports are simple (pin/roller), not clamped
+      support_span_fraction_of_length: 0.80       # outer supports at 10% from each end
+      support_left_fraction: 0.10                 # left support at 10% of plate length from end
+      support_right_fraction: 0.90                # right support at 90% of plate length from end
+      loading_type: point_load_or_line_load       # resolved to CalculiX *CLOAD by exporter
+      proxy_only: false
+      version_1_note: >
+        Support coordinates are fractional and idealised.  Exact node selection
+        is performed by solver_exporter.py based on the meshed geometry.
+
+
+  # ----------------------------------------------------------------------------
+  # Cyclic / Fatigue-Risk Proxy
+  # ----------------------------------------------------------------------------
+  # Represents cyclic axial loading for fatigue-risk proxy evaluation.
+  #
+  # ARCHITECTURAL DECISION — cyclic case feeds a proxy score, NOT a solver run:
+  #   Version 1 does not run a time-stepping cyclic FE simulation.  Instead,
+  #   the cyclic_proxy load case triggers the fatigue_model.py module to
+  #   compute a risk proxy score from:
+  #     (a) stress results from a companion static case (e.g. axial_compression)
+  #     (b) the mean_force_n and amplitude_force_n defined here
+  #     (c) material fatigue limit from materials.yaml
+  #   This is clearly distinct from a validated fatigue-life simulation and
+  #   must be labelled as a proxy in all outputs.
+  #
+  # ARCHITECTURAL DECISION — R-ratio is not stored here in version 1:
+  #   The stress ratio R = σ_min / σ_max could be computed from mean and
+  #   amplitude forces, but because the fatigue proxy in version 1 does not
+  #   apply mean-stress correction (Goodman is a placeholder), storing R
+  #   explicitly would imply a fidelity the model does not yet have.
+  #   R-ratio can be added here when mean-stress correction is implemented.
+  # ----------------------------------------------------------------------------
+  cyclic_proxy:
+    enabled: true
+    load_case_type: cyclic              # must match LoadCaseType.CYCLIC
+    name: Cyclic Axial Proxy — 600 N mean / 180 N amplitude
+    description: >
+      Cyclic axial loading proxy for fatigue-risk screening.  Applies a
+      mean compressive force with a superimposed cyclic amplitude to drive
+      the fatigue-risk proxy calculation in fatigue_model.py.  This case
+      does NOT run a full time-stepping FE simulation and does NOT produce
+      a validated fatigue life estimate.  Output is a dimensionless proxy
+      score for comparative design ranking only.
+    mean_force_n: 600.0                 # N — mean compressive force (placeholder)
+    amplitude_force_n: 180.0            # N — half cyclic amplitude (placeholder)
+    frequency_hz: 2.0                   # Hz — representative walking gait frequency
+    cycle_count: 1000000                # 10^6 cycles — conventional HCF reference only
+    boundary_condition_label: cyclic_axial_proxy
+    loading_direction: negative_x       # mean load in compressive direction
+
+    metadata:
+      load_application_region: end_face_positive_x
+      fixed_region: end_face_negative_x
+      proxy_only: true                  # CRITICAL: this case uses proxy scoring, not FE cycling
+      companion_static_case: axial_compression  # static stress field used as proxy input
+      mean_stress_correction: goodman_placeholder  # not yet applied in version 1
+      r_ratio_note: >
+        R-ratio is not stored explicitly in version 1 because mean-stress
+        correction is a future placeholder.  When Goodman correction is
+        implemented, add r_ratio: computed_from_mean_and_amplitude here.
+      version_1_note: >
+        Cycle count is a conventional HCF reference number used for proxy
+        normalisation only.  It does NOT represent a validated tested cycle
+        count or a device lifetime requirement.
+
+
+# ------------------------------------------------------------------------------
+# 5. FUTURE PLACEHOLDERS
+# ------------------------------------------------------------------------------
+# Disabled entries reserved for load cases planned in future versions.
+#
+# ARCHITECTURAL DECISION — future placeholders are visible in config:
+#   Keeping disabled future entries in this file (rather than in comments or
+#   docs) means that when four-point bending or torsion is implemented, the
+#   developer adds the required fields to the existing stub and sets
+#   enabled: true, rather than writing a new entry from scratch.  The
+#   loadcases.py loader must skip entries with enabled: false.
+# ------------------------------------------------------------------------------
+
+future_placeholders:
+
+  # ----------------------------------------------------------------------------
+  # Four-Point Bending (deferred)
+  # ----------------------------------------------------------------------------
+  # Provides a more uniform bending moment between the inner load points.
+  # Preferred for standardised implant fatigue testing (e.g. ISO 9585).
+  # DEFERRED: implement after three-point bending is validated end-to-end.
+  # ----------------------------------------------------------------------------
+  bending_four_point:
+    enabled: false                      # OUT OF SCOPE — version 1
+    load_case_type: bending
+    name: Four-Point Bending (placeholder)
+    description: >
+      Four-point bending configuration with two outer simple supports and two
+      inner load application points.  Produces a uniform bending moment between
+      the inner loading points.  Relevant to ISO 9585 plate bending fatigue
+      testing.  Deferred to a future version pending three-point validation.
+    force_n: null                       # to be defined when implemented
+    boundary_condition_label: four_point_bending_idealized
+    metadata:
+      inner_span_fraction_of_length: null   # to be defined
+      outer_span_fraction_of_length: null   # to be defined
+      version_note: deferred_to_future_version
+
+  # ----------------------------------------------------------------------------
+  # Torsion (deferred)
+  # ----------------------------------------------------------------------------
+  # Relevant for plates under rotational loading (e.g. torsional instability
+  # during fracture healing).  Not modelled in version 1.
+  # ----------------------------------------------------------------------------
+  torsion:
+    enabled: false                      # OUT OF SCOPE — version 1
+    load_case_type: null                # no LoadCaseType enum member yet; add when implemented
+    name: Torsion (placeholder)
+    description: >
+      Torsional load case applying a twisting moment about the plate's
+      longitudinal axis.  Relevant to rotational stability assessment.
+      Deferred to a future version; requires both a new LoadCaseType enum
+      member and solver BC implementation.
+    torque_n_mm: null                   # to be defined when implemented
+    boundary_condition_label: torsional_axial_proxy
+    metadata:
+      version_note: deferred_to_future_version

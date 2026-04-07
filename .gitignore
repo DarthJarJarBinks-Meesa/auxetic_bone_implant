@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.whl
+
+# Virtual environment
+venv/
+.venv/
+env/
+ENV/
+
+# Environment / secrets
+.env
+*.env
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+*.coveragerc
+
+# Type checkers
+.pyre/
+.mypy_cache/
+.ruff_cache/
+pyrightconfig.json
+
+# Project outputs (large, generated)
+runs/
+reports/
+data/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Logs
+*.log
+output.txt

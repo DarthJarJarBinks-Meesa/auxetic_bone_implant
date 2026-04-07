@@ -1,0 +1,566 @@
+# ==============================================================================
+# config/sweep_config.yaml
+# ==============================================================================
+# Parameter sweep configuration for the auxetic orthopedic plate pipeline.
+#
+# PURPOSE:
+#   This file defines the version-1 sweep space across designs, design
+#   parameters, plate thickness, materials, and load cases.  It is consumed
+#   by src/generate_cases.py (case list generation) and
+#   src/workflow/orchestrator.py (staged multi-case execution).
+#
+# RELATIONSHIP TO OTHER CONFIG FILES:
+#   - base_config.yaml     : global paths, units, geometry and execution defaults
+#   - materials.yaml       : full material property definitions (referenced by name here)
+#   - loadcases.yaml       : full load case definitions (referenced by key here)
+#   - meshing.yaml         : mesh size and quality settings
+#
+# ARCHITECTURAL DECISION — sweep config references other libraries by key:
+#   Material names and load case keys used in this file must exactly match
+#   the keys defined in materials.yaml and loadcases.yaml respectively.
+#   The generate_cases.py module resolves names to full objects at runtime.
+#   This avoids duplicating property values here and keeps the sweep config
+#   readable as a pure combinatorial specification.
+#
+# ARCHITECTURAL DECISION — first-pass vs full sweep separation:
+#   Every design and global dimension defines both `values` (full sweep) and
+#   `first_pass_values` (reduced screening sweep).  This allows the staged
+#   execution workflow to run a fast coarse screen before committing to the
+#   full combinatorial space, which can grow large quickly.
+#
+# !! VERSION 1 COMPUTATIONAL SCOPE !!
+#   Full combinatorial sweeps across all parameters, all materials, and all
+#   load cases can produce hundreds of cases.  The recommended workflow is
+#   staged execution (see staged_execution section).  Use first_pass_values
+#   for initial geometry validation and coarse structural screening before
+#   expanding to the full sweep.
+#
+# UNITS CONVENTION (consistent with base_config.yaml and case_schema.py):
+#   Length / displacement : mm
+#   Force                 : N
+#   Stress / modulus      : MPa
+#   Angle                 : degrees
+# ==============================================================================
+
+
+# ------------------------------------------------------------------------------
+# 1. METADATA
+# ------------------------------------------------------------------------------
+
+metadata:
+  config_name: auxetic_plate_sweep_config
+  version: "1.0.0"
+  description: >
+    Version-1 parameter sweep configuration for the auxetic orthopedic plate
+    parametric study.  Defines sweep ranges for re-entrant honeycomb, rotating
+    square, and tetrachiral designs across plate thickness, material, and load
+    case dimensions.
+
+  notes:
+    - >
+      Version 1 is intended for manageable exploratory sweeps, not exhaustive
+      brute-force combinatorics.  Full combinatorial sweeps across all
+      parameters can produce O(100–1000) cases; staged execution is strongly
+      recommended to keep runtime and storage costs practical.
+    - >
+      Use first_pass_values for initial geometry validation and coarse
+      structural screening.  Expand to full values only for designs and
+      parameter ranges that pass the first stage.
+    - >
+      Density has been removed as a geometric sweep parameter per architecture
+      spec.  Do not re-add it here.
+    - >
+      Fillet radius for tetrachiral is a derived parameter (fillet_radius =
+      0.25 * node_radius / 1.05) and must NOT appear as a sweep parameter.
+    - >
+      Material names and load case keys must exactly match entries in
+      config/materials.yaml and config/loadcases.yaml respectively.
+
+
+# ------------------------------------------------------------------------------
+# 2. STRATEGY
+# ------------------------------------------------------------------------------
+# Overall sweep generation approach.
+#
+# ARCHITECTURAL DECISION — baseline_plus_one_factor_variation as default mode:
+#   Full combinatorial mode generates every possible combination of parameter
+#   values, which scales multiplicatively and can be very large.
+#   baseline_plus_one_factor_variation generates the baseline case plus cases
+#   where each parameter varies individually from its baseline while all
+#   others hold at baseline.  This provides useful sensitivity information
+#   with far fewer cases and is the recommended starting mode.
+#   Switch to `combinatorial` only for targeted full-space sweeps.
+#
+# ARCHITECTURAL DECISION — prefer_baseline_plus_variation: true:
+#   Even in combinatorial mode this flag signals to generate_cases.py that
+#   the baseline case should always be included as a reference point,
+#   regardless of whether the baseline values appear explicitly in the
+#   sweep_parameters value lists.
+# ------------------------------------------------------------------------------
+
+strategy:
+  # Sweep generation mode
+  # Options: combinatorial | baseline_plus_one_factor_variation
+  mode: baseline_plus_one_factor_variation
+
+  allow_partial_sweeps: true         # a design or parameter subset can be swept independently
+  allow_single_case_runs: true       # a single manually specified case can be run without a sweep
+  prefer_baseline_plus_variation: true  # always include the baseline case as a reference
+
+  # Staged screening is recommended for version 1 (see staged_execution section)
+  enable_staged_screening: true
+
+  # Default mode used by generate_cases.py when no explicit override is given
+  default_case_generation_mode: baseline_plus_one_factor_variation
+
+
+# ------------------------------------------------------------------------------
+# 3. GLOBAL DEFAULTS
+# ------------------------------------------------------------------------------
+# Parameter values shared across all designs unless overridden per design.
+# ------------------------------------------------------------------------------
+
+global_defaults:
+  default_cell_size_mm: 7.85   # mm — nominal square envelope baseline
+  lattice_repeats_x: 5         # fixed at 5 for version 1
+  lattice_repeats_y: 3         # fixed at 3 for version 1
+
+  # If a parameter is not listed in a design's sweep_parameters, use the
+  # baseline value from geometry_defaults in base_config.yaml.
+  use_design_baseline_if_not_swept: true
+
+  # Include the reference STEP file path in case metadata for traceability.
+  # The STEP file is reference geometry only; it does not drive the pipeline.
+  include_reference_step_path_in_case_metadata: true
+
+  # Designs active for sweep generation in version 1
+  enabled_designs:
+    - reentrant
+    - rotating_square
+    - tetrachiral
+
+
+# ------------------------------------------------------------------------------
+# 4. MATERIALS
+# ------------------------------------------------------------------------------
+# Which materials are included in sweep generation.
+# Names must exactly match keys in config/materials.yaml.
+#
+# ARCHITECTURAL DECISION — default_material_for_screening and first_pass_materials:
+#   Running all materials in every stage is expensive.  Ti-6Al-4V is selected
+#   as the screening default because it is better characterised and more
+#   commonly used as the primary design reference.  Ti-5Al-2.5Fe is added in
+#   stage 2 once geometry and structural behaviour has been validated on the
+#   primary material.
+# ------------------------------------------------------------------------------
+
+materials:
+  enabled_materials:
+    - Ti-6Al-4V
+    - Ti-5Al-2.5Fe
+
+  # Material used for single-material screening passes (stage 1)
+  default_material_for_screening: Ti-6Al-4V
+
+  # Materials included in first-pass / stage-1 runs only
+  first_pass_materials:
+    - Ti-6Al-4V
+
+
+# ------------------------------------------------------------------------------
+# 5. LOAD CASES
+# ------------------------------------------------------------------------------
+# Which load cases are included in sweep generation.
+# Keys must exactly match entries in config/loadcases.yaml.
+#
+# ARCHITECTURAL DECISION — axial_compression as first-pass load case only:
+#   Axial compression is the most informative single load case for comparing
+#   structural stiffness and peak stress across designs.  Running it alone in
+#   stage 1 gives fast comparative results before adding the computational
+#   cost of bending and cyclic proxy cases.
+# ------------------------------------------------------------------------------
+
+loadcases:
+  enabled_loadcases:
+    - axial_compression
+    - axial_tension
+    - bending_three_point
+    - cyclic_proxy
+
+  # Load cases used in stage-1 first pass
+  default_first_pass_loadcases:
+    - axial_compression
+
+  # Load cases added in subsequent stages
+  secondary_loadcases:
+    - axial_tension
+    - bending_three_point
+    - cyclic_proxy
+
+
+# ------------------------------------------------------------------------------
+# 6. PLATE THICKNESS
+# ------------------------------------------------------------------------------
+# The real sweep variable for the 3D extrusion depth.
+#
+# ARCHITECTURAL DECISION — plate_thickness is the primary sweep dimension:
+#   Per the architecture spec, the reference STEP files were extruded to 7 mm
+#   but that is reference geometry only.  plate_thickness here defines the
+#   actual parametric extrusion depth used by the pipeline.
+#
+# ARCHITECTURAL DECISION — first_pass_values span the lower and upper thirds:
+#   2.5 mm (mid-range) and 3.5 mm (upper-mid) give a quick indication of
+#   thickness sensitivity without running all 8 values in stage 1.
+# ------------------------------------------------------------------------------
+
+plate_thickness:
+  enabled: true
+  baseline_mm: 2.5    # mm — default single-case thickness; mid-range of sweep
+
+  # Full version-1 sweep: 1.5 to 5.0 mm in 0.5 mm steps
+  values_mm:
+    - 1.5
+    - 2.0
+    - 2.5
+    - 3.0
+    - 3.5
+    - 4.0
+    - 4.5
+    - 5.0
+
+  # Reduced set for stage-1 coarse screening
+  first_pass_values_mm:
+    - 2.5
+    - 3.5
+
+
+# ------------------------------------------------------------------------------
+# 7. DESIGN SWEEPS
+# ------------------------------------------------------------------------------
+# Per-design sweep parameter definitions.
+#
+# Structure per design:
+#   enabled             : include this design in sweep generation
+#   baseline            : reference parameter values from architecture spec
+#   sweep_parameters    : per-parameter value lists for the full sweep
+#   first_pass_parameters: reduced per-parameter value lists for stage-1 screening
+#   notes               : design-specific sweep rationale
+#
+# ARCHITECTURAL DECISION — baseline values are not duplicated in sweep_parameters:
+#   The baseline case is always generated from the `baseline` block regardless
+#   of whether those exact values appear in `sweep_parameters`.  This is
+#   controlled by strategy.prefer_baseline_plus_variation.  Repeating the
+#   baseline inside sweep_parameters would generate duplicate cases.
+# ------------------------------------------------------------------------------
+
+design_sweeps:
+
+  # --------------------------------------------------------------------------
+  # Re-entrant Honeycomb
+  # --------------------------------------------------------------------------
+  reentrant:
+    enabled: true
+
+    baseline:
+      cell_size: 7.85          # mm
+      wall_thickness: 1.5      # mm
+      reentrant_angle_deg: 70.0  # degrees
+
+    sweep_parameters:
+      # Cell size scales the entire unit cell envelope.  Three values give
+      # coarse, baseline, and fine lattice density.
+      cell_size:
+        values: [6.5, 7.85, 9.0]           # mm
+        units: mm
+
+      # Wall thickness governs structural stiffness and minimum feature size.
+      # Range covers thin (flexible/auxetic-dominant) to thick (stiffer) walls.
+      # Upper bound 2.5 mm is below cell_size to avoid geometric degeneracy.
+      wall_thickness:
+        values: [1.0, 1.5, 2.0, 2.5]      # mm
+        units: mm
+        # NOTE: wall_thickness must remain < cell_size; generate_cases.py
+        # will skip combinations that violate this constraint.
+
+      # Re-entrant angle controls the degree of auxetic behaviour.
+      # Valid range is (0°, 90°); approaching 90° reduces auxetic effect.
+      # Range from 45° (strongly re-entrant) to 85° (weakly re-entrant).
+      reentrant_angle_deg:
+        values: [45.0, 55.0, 65.0, 70.0, 75.0, 80.0, 85.0]  # degrees
+        units: deg
+        valid_range: [0.0, 90.0]  # exclusive bounds; enforced by validator
+
+    first_pass_parameters:
+      # Reduced set for stage-1 coarse screening: baseline + two variations
+      cell_size:
+        values: [7.85]
+      wall_thickness:
+        values: [1.0, 1.5, 2.0]
+      reentrant_angle_deg:
+        values: [55.0, 70.0, 80.0]
+
+    notes: >
+      The re-entrant honeycomb produces negative Poisson's ratio (auxetic)
+      behaviour through re-entrant strut geometry.  reentrant_angle_deg is
+      the primary auxetic control parameter.  wall_thickness is the main
+      stiffness control.  Combinations with wall_thickness >= cell_size are
+      geometrically invalid and will be filtered by generate_cases.py.
+
+
+  # --------------------------------------------------------------------------
+  # Rotating Square
+  # --------------------------------------------------------------------------
+  # ARCHITECTURAL DECISION — rotation_angle_deg range centred on 22.5° baseline:
+  #   The rotating-square topology operates in a fundamentally different angle
+  #   regime from the re-entrant design.  The valid topological range is
+  #   (0°, 45°); beyond 45° adjacent squares would overlap.  The sweep range
+  #   is chosen to bracket the 22.5° baseline with meaningful structural
+  #   variation, not to match the re-entrant 45–90° range.
+  # --------------------------------------------------------------------------
+  rotating_square:
+    enabled: true
+
+    baseline:
+      cell_size: 7.85           # mm
+      rotation_angle_deg: 22.5  # degrees
+      hinge_thickness: 0.40     # mm
+
+    sweep_parameters:
+      cell_size:
+        values: [6.5, 7.85, 9.0]   # mm
+        units: mm
+
+      # Rotation angle drives the auxetic opening mechanism.
+      # Valid range is (0°, 45°) for rotating-square topology.
+      # Range covers near-zero rotation (stiff, minimal auxetic effect) to
+      # large rotation (flexible, pronounced auxetic opening).
+      rotation_angle_deg:
+        values: [10.0, 15.0, 22.5, 30.0, 35.0]  # degrees
+        units: deg
+        valid_range: [0.0, 45.0]   # exclusive bounds; enforced by validator
+
+      # Hinge thickness is the thinnest geometric feature in the design.
+      # Very thin hinges (< 0.30 mm) may be near the manufacturability limit
+      # for titanium SLM; very thick hinges approach the rotating-square limit.
+      hinge_thickness:
+        values: [0.30, 0.40, 0.60, 0.80, 1.00]  # mm
+        units: mm
+        # NOTE: hinge_thickness must remain < cell_size; values approaching
+        # cell_size are geometrically degenerate and will be filtered.
+
+    first_pass_parameters:
+      cell_size:
+        values: [7.85]
+      rotation_angle_deg:
+        values: [15.0, 22.5, 30.0]
+      hinge_thickness:
+        values: [0.30, 0.40, 0.60]
+
+    notes: >
+      The rotating-square topology produces auxetic behaviour through rotation
+      of rigid square units connected by thin hinges.  rotation_angle_deg and
+      hinge_thickness are the primary design levers.  hinge_thickness is a
+      true independent geometry parameter (not derived).  Combinations with
+      hinge_thickness >= cell_size are geometrically invalid and will be
+      filtered.  Values of hinge_thickness < 0.20 mm may fall below the
+      minimum feature size threshold set in base_config.yaml and will trigger
+      a validation warning.
+
+
+  # --------------------------------------------------------------------------
+  # Tetrachiral
+  # --------------------------------------------------------------------------
+  # ARCHITECTURAL DECISION — fillet_radius is NOT a sweep parameter:
+  #   fillet_radius is derived as 0.25 * (node_radius / 1.05) per the
+  #   architecture spec.  It must not appear in sweep_parameters.  The
+  #   formula is documented in base_config.yaml and enforced in
+  #   TetrachiralParameters.fillet_radius (a read-only property).
+  #   Adding it here as an independent parameter would create a contradiction
+  #   with the data model and produce inconsistent geometry.
+  # --------------------------------------------------------------------------
+  tetrachiral:
+    enabled: true
+
+    baseline:
+      cell_size: 7.85           # mm
+      node_radius: 1.05         # mm
+      ligament_thickness: 1.05  # mm
+      # fillet_radius is derived — DO NOT add as a sweep parameter
+      # fillet_radius = 0.25 * (node_radius / 1.05) — computed at runtime
+
+    sweep_parameters:
+      cell_size:
+        values: [6.5, 7.85, 9.0]   # mm
+        units: mm
+
+      # Node radius controls the size of the chiral hub circles.
+      # The node diameter (2 * node_radius) must remain less than cell_size
+      # to avoid geometric degeneracy.  Range covers small, baseline, and
+      # large hub variants.
+      node_radius:
+        values: [0.80, 1.05, 1.25, 1.50]   # mm
+        units: mm
+        # NOTE: 2 * node_radius must be < cell_size; generate_cases.py
+        # will filter invalid combinations.
+
+      # Ligament thickness controls the connecting arm cross-section.
+      # Must remain less than cell_size.
+      ligament_thickness:
+        values: [0.80, 1.05, 1.25, 1.50]   # mm
+        units: mm
+
+    first_pass_parameters:
+      cell_size:
+        values: [7.85]
+      node_radius:
+        values: [0.80, 1.05, 1.25]
+      ligament_thickness:
+        values: [0.80, 1.05, 1.25]
+
+    notes: >
+      The tetrachiral topology produces auxetic behaviour through chiral hub-
+      and-ligament geometry.  node_radius and ligament_thickness are the
+      primary independent parameters.  fillet_radius is a derived parameter
+      (0.25 * node_radius / 1.05) and must not be swept independently.
+      Combinations where 2 * node_radius >= cell_size are geometrically
+      invalid and will be filtered.  fillet_radius_derived is included in
+      case metadata for traceability but has no independent swept value.
+
+
+# ------------------------------------------------------------------------------
+# 8. STAGED EXECUTION
+# ------------------------------------------------------------------------------
+# Defines the recommended multi-stage workflow for version-1 sweeps.
+#
+# ARCHITECTURAL DECISION — staged execution as a configuration concern:
+#   Staging parameters are stored here (not in orchestrator.py) so the
+#   workflow can be adjusted without code changes.  The orchestrator reads
+#   this section to determine which cases to generate and run at each stage.
+#   Stages are ordered; stage N should only begin after stage N-1 results
+#   have been reviewed and a decision made to proceed.
+#
+# Each stage entry is a declarative specification, not procedural code.
+# The orchestrator is responsible for interpreting and executing stages.
+# ------------------------------------------------------------------------------
+
+staged_execution:
+  enabled: true
+
+  # Stage 1: Geometry build and coarse structural screening
+  # Goal: validate that geometry generates correctly for all three designs
+  # and get a quick structural ranking using a single material and load case.
+  stage_1:
+    name: geometry_and_coarse_screen
+    description: >
+      Validate geometry generation for all three designs using first-pass
+      parameter values.  Run axial compression with Ti-6Al-4V only for a fast
+      coarse structural screening sweep.
+    materials:
+      - Ti-6Al-4V
+    loadcases:
+      - axial_compression
+    plate_thickness_values: first_pass_values_mm   # use first_pass_values_mm from plate_thickness section
+    use_first_pass_parameter_values: true           # use first_pass_parameters from each design_sweeps entry
+    stop_on_geometry_failure: false                 # log failures; do not abort remaining cases
+
+  # Stage 2: Expanded structural screen with both materials and structural load cases
+  # Goal: compare material effect and identify candidates that perform well
+  # under tension and bending in addition to compression.
+  stage_2:
+    name: expanded_structural_screen
+    description: >
+      Run tension and bending load cases across both materials using the
+      first-pass parameter set.  Identify structurally promising candidates
+      before committing to the full sweep and fatigue proxy evaluation.
+    materials:
+      - Ti-6Al-4V
+      - Ti-5Al-2.5Fe
+    loadcases:
+      - axial_tension
+      - bending_three_point
+    plate_thickness_values: first_pass_values_mm
+    use_first_pass_parameter_values: true
+    stop_on_geometry_failure: false
+
+  # Stage 3: Fatigue-risk proxy screen on top candidates
+  # Goal: apply the cyclic proxy load case to designs that passed stages 1 and 2.
+  # Input candidates are identified from stage 1 and 2 rankings.
+  stage_3:
+    name: fatigue_proxy_screen
+    description: >
+      Apply the cyclic fatigue-risk proxy load case to top structural candidates
+      identified from stages 1 and 2.  Uses both materials and first-pass
+      thickness values.  Output is a comparative fatigue-risk proxy score per
+      design; NOT a validated fatigue life estimate.
+    materials:
+      - Ti-6Al-4V
+      - Ti-5Al-2.5Fe
+    loadcases:
+      - cyclic_proxy
+    plate_thickness_values: first_pass_values_mm
+    use_first_pass_parameter_values: true
+    stop_on_geometry_failure: false
+    proxy_only: true   # reminder: cyclic_proxy case produces a proxy score only
+
+  # Stage 4: Full combinatorial sweep on selected candidates (optional)
+  # Goal: run the full parameter sweep for designs and ranges identified as
+  # promising in stages 1–3.  This stage may generate significantly more cases.
+  stage_4:
+    name: full_sweep_selected_candidates
+    description: >
+      Full combinatorial sweep using all sweep_parameter values for designs
+      that have been manually selected after reviewing stage 1–3 results.
+      Enabled designs and parameter ranges can be restricted here by editing
+      global_defaults.enabled_designs before running stage 4.
+    materials:
+      - Ti-6Al-4V
+      - Ti-5Al-2.5Fe
+    loadcases:
+      - axial_compression
+      - axial_tension
+      - bending_three_point
+      - cyclic_proxy
+    plate_thickness_values: values_mm   # use full values_mm from plate_thickness section
+    use_first_pass_parameter_values: false  # use full sweep_parameters value lists
+    stop_on_geometry_failure: false
+    # WARNING: full combinatorial sweep may generate O(100–1000) cases.
+    # Review the case count estimate from generate_cases.py before running.
+
+
+# ------------------------------------------------------------------------------
+# 9. FILTERS
+# ------------------------------------------------------------------------------
+# Case-generation filter controls applied by generate_cases.py before cases
+# are written to the run queue.
+#
+# ARCHITECTURAL DECISION — filters in config, not hard-coded in generate_cases.py:
+#   Keeping filter flags here means the filtering behaviour can be adjusted
+#   (e.g. temporarily allowing invalid parameter sets for debugging) without
+#   touching the generation code.  The generator enforces filters by calling
+#   CaseDefinition.validate() and applying the extra guards listed here.
+# ------------------------------------------------------------------------------
+
+filters:
+  # Skip any parameter combination that would fail CaseDefinition.validate()
+  skip_invalid_parameter_sets: true
+
+  # Skip cases whose case_id hash already exists in the run directory
+  skip_duplicate_cases: true
+
+  # Enforce positive dimension constraints (cell_size, plate_thickness, etc.)
+  require_positive_dimensions: true
+
+  # Enforce design-specific angle range constraints
+  # (e.g. reentrant 0–90°, rotating_square 0–45°)
+  require_angles_within_defined_ranges: true
+
+  # Always include the pure-baseline case for each design as a reference point
+  allow_baseline_case_generation: true
+
+  # Warn if total generated case count exceeds this threshold before run starts.
+  # The warning prompts the user to confirm or switch to staged execution.
+  max_total_cases_warning_threshold: 200
+
+  # Do NOT hard-stop generation if the count exceeds the threshold;
+  # only issue a warning and log the case count.
+  stop_if_case_count_exceeds_threshold: false
