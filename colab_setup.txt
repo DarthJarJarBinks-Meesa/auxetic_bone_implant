@@ -9,11 +9,14 @@ condacolab.install()
 # --- AFTER THE KERNEL RESTARTS AUTOMATICALLY, RUN THIS CELL ---
 
 # 2. Install CadQuery and system dependencies via Conda
-!conda install -c conda-forge cadquery gmsh calculix-ccx -y
+!conda install -c conda-forge cadquery gmsh calculix -y
 
-# 3. Clone the repository (if you haven't already or need a fresh copy)
-!git clone https://github.com/DarthJarJarBinks-Meesa/auxetic_bone_implant.git
+# 3. Clone the repository (pull if it already exists)
+import os
+if not os.path.exists("auxetic_bone_implant"):
+    !git clone https://github.com/DarthJarJarBinks-Meesa/auxetic_bone_implant.git
 %cd auxetic_bone_implant
+!git pull origin main
 
 # 4. Install Python requirements
 !pip install -r requirements.txt
