@@ -305,7 +305,7 @@ def _build_mesh_reference_block(
         block = (
             f"**\n"
             f"** === MESH INCLUDE ===\n"
-            f"*INCLUDE, INPUT={mesh_inp_fragment.name}\n"
+            f"*INCLUDE, INPUT=../mesh/{mesh_inp_fragment.name}\n"
             f"** Mesh source: {mesh_path.name}\n"
         )
     else:
