@@ -206,6 +206,7 @@ def _safe_bounding_box(obj: Any) -> Optional[tuple[float, float, float]]:
     Returns ``None`` on any failure rather than raising, so that downstream
     validators can emit a structured warning instead of crashing.
 
+    """
     def _wp_bbox(o: Any) -> Any:
         # A CadQuery Workplane might have multiple items on the stack 
         # (e.g. the accumulated lattice tiles). Computing the bounding box 
