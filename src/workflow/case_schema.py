@@ -41,7 +41,7 @@ import math  # noqa: F401  (available for formula documentation; used by callers
 
 from dataclasses import dataclass, field
 from enum import Enum, unique
-from typing import Any
+from typing import Any, Union
 
 
 # ---------------------------------------------------------------------------
@@ -559,9 +559,9 @@ class TetrachiralParameters(BaseDesignParameters):
 #   TetrachiralParameters).  The union alias preserves narrowing after
 #   isinstance() checks.  When a new design is added, only this alias and the
 #   dispatch table in design_parameters_from_dict need updating.
-DesignParameterSet = (
-    ReentrantParameters | RotatingSquareParameters | TetrachiralParameters
-)
+DesignParameterSet = Union[
+    ReentrantParameters, RotatingSquareParameters, TetrachiralParameters
+]
 """
 Union of all concrete design parameter types.
 
@@ -610,8 +610,8 @@ class MaterialDefinition:
     poissons_ratio: float
     density_g_per_cm3: float
     yield_strength_mpa: float
-    fatigue_limit_mpa: float | None = None   # placeholder; see NOTE above
-    notes: str | None = None
+    fatigue_limit_mpa: Union[float, None] = None   # placeholder; see NOTE above
+    notes: Union[str, None] = None
 
     # ------------------------------------------------------------------
     # Validation
@@ -714,9 +714,9 @@ class LoadCaseDefinition:
 
     load_case_type: LoadCaseType
     name: str
-    force_n: float | None = None           # N — applied force magnitude
-    description: str | None = None
-    boundary_condition_label: str | None = None
+    force_n: Union[float, None] = None           # N — applied force magnitude
+    description: Union[str, None] = None
+    boundary_condition_label: Union[str, None] = None
 
     # ARCHITECTURAL DECISION — mutable default via field(default_factory=dict):
     #   Mutable defaults (list, dict) must use default_factory in dataclasses

@@ -441,6 +441,7 @@ def write_summary_csv(
     """
     rows = []
     for case_id, cr in case_results.items():
+        cd = None
         defs = case_definitions
         if defs is not None:
             cd = defs.get(case_id)
@@ -471,6 +472,7 @@ def write_ranked_results_csv(
     """
     rows = []
     for rc in ranking_result.ranked_cases:
+        cd = None
         defs = case_definitions
         if defs is not None:
             cd = defs.get(rc.case_id)

@@ -48,7 +48,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Union
+from typing import Any, Union, Optional
 
 import cadquery as cq
 
@@ -199,7 +199,7 @@ class ValidationResult:
 # Bounding-box helpers
 # ---------------------------------------------------------------------------
 
-def _safe_bounding_box(obj: Any) -> tuple[float, float, float] | None:
+def _safe_bounding_box(obj: Any) -> Optional[tuple[float, float, float]]:
     """
     Attempt to extract ``(xsize, ysize, zsize)`` from a CadQuery object.
 
@@ -310,7 +310,7 @@ def validate_minimum_feature_size(
 
 def validate_planar_geometry(
     planar_geometry: Any,
-    minimum_feature_size_mm: float | None = None,
+    minimum_feature_size_mm: Optional[float] = None,
 ) -> ValidationResult:
     """
     Validate a 2D CadQuery planar geometry object.
@@ -405,7 +405,7 @@ def validate_planar_geometry(
 
 def validate_solid_geometry(
     solid_geometry: Any,
-    minimum_feature_size_mm: float | None = None,
+    minimum_feature_size_mm: Optional[float] = None,
 ) -> ValidationResult:
     """
     Validate a 3D CadQuery solid geometry object.
@@ -507,7 +507,7 @@ def validate_solid_geometry(
 def validate_unit_cell_object(
     unit_cell: Any,
     build_and_check_2d: bool = False,
-    minimum_feature_size_mm: float | None = None,
+    minimum_feature_size_mm: Optional[float] = None,
 ) -> ValidationResult:
     """
     Validate a ``BaseUnitCell`` subclass instance.
@@ -600,10 +600,10 @@ def validate_unit_cell_object(
 
 def validate_lattice_geometry(
     lattice_geometry: Any,
-    expected_repeats_x: int | None = None,
-    expected_repeats_y: int | None = None,
-    cell_size: float | None = None,
-    minimum_feature_size_mm: float | None = None,
+    expected_repeats_x: Optional[int] = None,
+    expected_repeats_y: Optional[int] = None,
+    cell_size: Optional[float] = None,
+    minimum_feature_size_mm: Optional[float] = None,
 ) -> ValidationResult:
     """
     Validate a tiled 2D lattice geometry.
@@ -683,9 +683,9 @@ def validate_lattice_geometry(
 
 def validate_case_geometry(
     case_definition: Any,
-    planar_geometry: Any | None = None,
-    solid_geometry: Any | None = None,
-    minimum_feature_size_mm: float | None = None,
+    planar_geometry: Optional[Any] = None,
+    solid_geometry: Optional[Any] = None,
+    minimum_feature_size_mm: Optional[float] = None,
 ) -> ValidationResult:
     """
     Validate geometry associated with a pipeline case definition.
@@ -757,7 +757,7 @@ def validate_case_geometry(
 
 def require_valid_planar_geometry(
     planar_geometry: Any,
-    minimum_feature_size_mm: float | None = None,
+    minimum_feature_size_mm: Optional[float] = None,
     context: str = "",
 ) -> None:
     """
@@ -787,7 +787,7 @@ def require_valid_planar_geometry(
 
 def require_valid_solid_geometry(
     solid_geometry: Any,
-    minimum_feature_size_mm: float | None = None,
+    minimum_feature_size_mm: Optional[float] = None,
     context: str = "",
 ) -> None:
     """

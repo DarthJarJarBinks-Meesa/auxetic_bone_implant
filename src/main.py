@@ -47,7 +47,7 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, List, Optional, Union
 
 from generate_cases import (
     CaseGenerationError,
@@ -289,7 +289,7 @@ def build_case_generation_options_from_args(
 
 def build_orchestrator_options_from_args(
     args: argparse.Namespace,
-    project_root: Path | None,
+    project_root: Optional[Path],
 ) -> OrchestratorOptions:
     """
     Map CLI arguments into ``OrchestratorOptions``.
@@ -520,7 +520,7 @@ def print_json_summary(summary: OrchestratorSummary) -> None:
 # Main entrypoint
 # ---------------------------------------------------------------------------
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     """
     Main entrypoint for the top-level pipeline CLI.
 

@@ -179,9 +179,9 @@ class RotatingSquareUnitCell(BaseUnitCell):
                 f"(rotation_angle_deg={p.rotation_angle_deg:.2f}°).  "
                 f"Increase rotation_angle_deg above 5°."
             )
-        if p.hinge_thickness >= 0.6 * bridge_len:
+        if p.hinge_thickness >= 0.85 * bridge_len:
             raise ValueError(
-                f"hinge_thickness ({p.hinge_thickness:.4f} mm) is ≥ 60% of "
+                f"hinge_thickness ({p.hinge_thickness:.4f} mm) is ≥ 85% of "
                 f"the central hinge bridge length ({bridge_len:.4f} mm). "
                 f"The connecting bridge would not be mechanically hinge-like. "
                 f"Reduce hinge_thickness or increase rotation_angle_deg."

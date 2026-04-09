@@ -45,7 +45,7 @@ import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Union, Optional
 
 from workflow.case_schema import CaseDefinition, CaseResult, CaseStatus
 from workflow.case_runner import (
@@ -107,12 +107,12 @@ class OrchestratorOptions:
     stop_on_first_failure: bool = False
     run_ranking: bool = True
     run_reporting: bool = True
-    reports_dir: str | None = None
+    reports_dir: Optional[str] = None
     top_n_filtered: int = 10
-    stage_name: str | None = None
+    stage_name: Optional[str] = None
     use_stage_case_filtering: bool = False
     continue_on_case_failure: bool = True
-    case_run_options: CaseRunOptions | None = None
+    case_run_options: Optional[CaseRunOptions] = None
 
 
 @dataclass
@@ -142,11 +142,11 @@ class OrchestratorSummary:
     skipped_cases: int
     successful_results: dict[str, CaseResult] = field(default_factory=dict)
     all_case_results: dict[str, CaseResult] = field(default_factory=dict)
-    ranking_result: Any | None = None
-    reporting_result: Any | None = None
+    ranking_result: Optional[Any] = None
+    reporting_result: Optional[Any] = None
     warnings: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
-    error_message: str | None = None
+    error_message: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable representation of the summary."""
@@ -179,7 +179,7 @@ class OrchestratorSummary:
 # ---------------------------------------------------------------------------
 
 def default_orchestrator_options(
-    project_root: str | Path | None = None,
+    project_root: Union[str, Path, None] = None,
 ) -> OrchestratorOptions:
     """
     Build ``OrchestratorOptions`` from ``base_config.yaml`` workflow settings.
@@ -235,8 +235,8 @@ def default_orchestrator_options(
 
 def filter_cases_for_stage(
     case_definitions: Sequence[CaseDefinition],
-    stage_name: str | None,
-    project_root: str | Path | None = None,
+    stage_name: Optional[str],
+    project_root: Union[str, Path, None] = None,
 ) -> list[CaseDefinition]:
     """
     Filter a case list to only those belonging to a named execution stage.
@@ -421,7 +421,7 @@ def _run_ranking_if_enabled(
     successful_results: dict[str, CaseResult],
     warnings: list[str],
     meta: dict[str, Any],
-) -> Any | None:
+) -> Optional[Any]:
     """
     Run the ranking module on successful case results if enabled.
 
@@ -479,11 +479,11 @@ def _run_ranking_if_enabled(
 def _run_reporting_if_enabled(
     options: OrchestratorOptions,
     all_case_results: dict[str, CaseResult],
-    ranking_result: Any | None,
+    ranking_result: Optional[Any],
     project_root: Path,
     warnings: list[str],
     meta: dict[str, Any],
-) -> Any | None:
+) -> Optional[Any]:
     """
     Run the reporting module after ranking if enabled.
 
@@ -554,8 +554,8 @@ def _run_reporting_if_enabled(
 
 def run_cases(
     case_definitions: Sequence[CaseDefinition],
-    options: OrchestratorOptions | None = None,
-    project_root: str | Path | None = None,
+    options: Optional[OrchestratorOptions] = None,
+    project_root: Union[str, Path, None] = None,
 ) -> OrchestratorSummary:
     """
     Execute a collection of pipeline cases sequentially and return a summary.
@@ -739,10 +739,22 @@ def run_cases(
             )
         else:
             failed_cases_tracker.append(1)
+            f_count = len(failed_cases_tracker)
             logger.warning(
                 "Case '%s': failed in %.3f s — %s",
                 case_id, case_elapsed, summary.error_message,
             )
+            if f_count <= 5:
+                # ARCHITECTURAL DECISION — print first few failures to stdout:
+                #   In notebook environments (Colab/Jupyter), deep logs are often
+                #   hidden. Printing the first few detailed errors ensures the
+                #   user sees the root cause (e.g. missing binary) immediately.
+                print(f"\n[ORCHESTRATOR ERROR] Failure {f_count}/5:")
+                print(f"  Case: {case_id}")
+                print(f"  Error: {summary.error_message}")
+                if summary.warnings:
+                    print(f"  Warnings: {summary.warnings[:3]}")
+                print("-" * 40)
 
             if options.stop_on_first_failure:
                 raise OrchestratorError(
