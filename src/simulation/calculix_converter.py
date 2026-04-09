@@ -36,7 +36,7 @@ def format_set(set_type: str, name: str, tags: list[int]) -> str:
     lines = [f"*{set_type}, {set_type}={name}"]
     for i in range(0, len(tags), 16):
         lines.append(", ".join(str(t) for t in tags[i:i+16]))
-    return "\\n".join(lines) + "\\n"
+    return "\n".join(lines) + "\n"
 
 
 def convert_msh_to_inp(msh_path: str | Path) -> str:
@@ -122,7 +122,7 @@ def convert_msh_to_inp(msh_path: str | Path) -> str:
     # Append to exported file
     try:
         with open(output_inp, "a", encoding="utf-8") as f:
-            f.write("\\n".join(additions))
+            f.write("\n".join(additions))
     except Exception as e:
         raise ConversionError(f"Failed to append sets to {output_inp}: {e}")
         
