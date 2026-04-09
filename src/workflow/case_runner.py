@@ -696,6 +696,15 @@ def _run_meshing_pipeline(
     run_meta["mesh_node_count"]    = mesh_result.metadata.get("node_count")
     run_meta["mesh_element_count"] = mesh_result.metadata.get("element_count")
 
+    # --- Convert to CalculiX INP include (Version 2) ---
+    try:
+        t0_conv = time.monotonic()
+        from simulation.calculix_converter import convert_msh_to_inp
+        convert_msh_to_inp(mesh_path)
+        run_meta["stage_timings"]["mesh_convert_seconds"] = float(f"{time.monotonic() - t0_conv:.3f}")
+    except Exception as exc:
+        warnings.append(f"Mesh to INP conversion failed: {exc}")
+
     logger.info(
         "Case '%s': meshed in %.3f s (%s nodes, %s elements).",
         case_definition.case_id, elapsed,
