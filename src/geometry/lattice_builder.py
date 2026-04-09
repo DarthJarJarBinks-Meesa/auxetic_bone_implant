@@ -302,11 +302,16 @@ def _tile_workplane(
 ) -> cq.Workplane:
     """
     Tile a base ``cq.Workplane`` face geometry across the supplied XY offsets
-    and return a single unioned ``cq.Workplane``.
+    and return a single accumulated ``cq.Workplane``.
 
-    ARCHITECTURAL DECISION — iterative union, not batch:
-        See module docstring.  Incremental union is more reliable for complex
-        auxetic face topologies than a single N-way boolean.
+    ARCHITECTURAL DECISION — stack accumulation over 2D union:
+        CadQuery's 2D boolean union (``Workplane.union``) is unreliable for
+        complex overlapping faces and frequently throws "must have at least one
+        solid on the stack" exceptions in recent OCC kernels.  Instead of
+        unioning the 2D tiles here, we accumulate all tile faces onto a single
+        Workplane stack.  The downstream ``extruder.py`` module calls
+        ``.extrude(..., combine=True)`` which is vastly more reliable and
+        correctly merges the overlapping 3D volumes into a single solid.
 
     ARCHITECTURAL DECISION — Z translation is zero:
         All tiling is strictly in XY (z=0).  The Z component is always 0.0.
@@ -317,27 +322,28 @@ def _tile_workplane(
         offsets:  List of (dx, dy) translation offsets for each tile.
 
     Returns:
-        Single ``cq.Workplane`` with all tiles unioned into one planar body.
+        Single ``cq.Workplane`` with all tile faces on its stack.
 
     Raises:
-        LatticeBuilderError: if no offsets are supplied or union fails.
+        LatticeBuilderError: if no offsets are supplied.
     """
     if not offsets:
         raise LatticeBuilderError("No tile offsets supplied; cannot build lattice.")
 
-    # Initialise the accumulator with the first tile (offset (dx, dy)).
-    dx0, dy0 = offsets[0]
-    accumulator: cq.Workplane = base_wp.translate((dx0, dy0, 0.0))
+    # Start with an empty workplane aligned to XY
+    accumulator = cq.Workplane("XY")
 
-    for dx, dy in offsets[1:]:
+    for dx, dy in offsets:
         try:
             tile = base_wp.translate((dx, dy, 0.0))
-            accumulator = accumulator.union(tile)
+            # Extract underlying CadQuery Face (or other geometry) objects
+            # and push them onto the accumulator stack.
+            for item in tile.vals():
+                accumulator = accumulator.add(item)
         except Exception as exc:
             raise LatticeBuilderError(
-                f"Boolean union failed while tiling at offset ({dx:.4f}, {dy:.4f}) mm: "
-                f"{exc}.  The unit-cell geometry may contain self-intersecting or "
-                f"degenerate faces.  Check build_2d() output for the design."
+                f"Failed translating tile to offset ({dx:.4f}, {dy:.4f}) mm: "
+                f"{exc}.  Check build_2d() output for the design."
             ) from exc
 
     return accumulator
