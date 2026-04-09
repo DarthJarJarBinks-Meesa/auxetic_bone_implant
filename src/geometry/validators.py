@@ -206,12 +206,17 @@ def _safe_bounding_box(obj: Any) -> Optional[tuple[float, float, float]]:
     Returns ``None`` on any failure rather than raising, so that downstream
     validators can emit a structured warning instead of crashing.
 
-    Tries:
-      1. ``obj.val().BoundingBox()``  — works for Workplane holding a solid.
-      2. ``obj.BoundingBox()``        — works for some Sketch objects.
-    """
+    def _wp_bbox(o: Any) -> Any:
+        # A CadQuery Workplane might have multiple items on the stack 
+        # (e.g. the accumulated lattice tiles). Computing the bounding box 
+        # of the compound guarantees we capture the full tiled extents.
+        import cadquery as cq
+        if hasattr(o, "vals") and o.vals():
+            return cq.Compound.makeCompound(o.vals()).BoundingBox()
+        return o.val().BoundingBox()
+
     for extractor in (
-        lambda o: o.val().BoundingBox(),
+        _wp_bbox,
         lambda o: o.BoundingBox(),
     ):
         try:
