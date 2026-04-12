@@ -24,6 +24,60 @@ import gmsh
 
 logger = logging.getLogger(__name__)
 
+
+def _parse_abaqus_element_type_from_header(element_header_line: str) -> str | None:
+    """Return the ``TYPE=`` value from an ``*ELEMENT`` header line, or None."""
+    for part in element_header_line.split(","):
+        kv = part.strip().split("=", 1)
+        if len(kv) == 2 and kv[0].strip().upper() == "TYPE":
+            return kv[1].strip()
+    return None
+
+
+def _is_abaqus_c3d_volume_solid(etype: str) -> bool:
+    """True for 3D continuum solids (C3D4, C3D8, C3D10, …) written for solid mechanics."""
+    return etype.upper().startswith("C3D")
+
+
+def strip_non_c3d_element_blocks_from_abaqus_inp(inp_path: Path) -> int:
+    """
+    Remove ``*ELEMENT`` sections whose type is not ``C3D*``.
+
+    Gmsh's Abaqus export often adds T3D2 (lines) and CPS3 (plane-stress faces).
+    Those need different CalculiX sections; our deck only assigns ``*SOLID SECTION``
+    to ``ALL_ELEMS`` (volume tets/bricks). Stripping non-C3D blocks avoids
+    ``gen3delem`` / zero-thickness errors.
+
+    Returns:
+        Number of ``*ELEMENT`` sections removed.
+    """
+    raw = inp_path.read_text(encoding="utf-8", errors="replace")
+    lines = raw.splitlines(keepends=True)
+    out: list[str] = []
+    i = 0
+    removed = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped_up = line.strip().upper()
+        if stripped_up.startswith("*ELEMENT"):
+            etype = _parse_abaqus_element_type_from_header(line)
+            if etype is not None and not _is_abaqus_c3d_volume_solid(etype):
+                removed += 1
+                i += 1
+                while i < len(lines) and not lines[i].lstrip().startswith("*"):
+                    i += 1
+                continue
+        out.append(line)
+        i += 1
+    inp_path.write_text("".join(out), encoding="utf-8")
+    if removed:
+        logger.info(
+            "Stripped %d non-C3D *ELEMENT section(s) from %s for CalculiX compatibility.",
+            removed,
+            inp_path.name,
+        )
+    return removed
+
 class ConversionError(Exception):
     pass
 
@@ -58,19 +112,12 @@ def convert_msh_to_inp(msh_path: str | Path) -> str:
     try:
         # Load mesh and export basic nodes/elements to INP
         gmsh.open(str(msh_path))
-        # Gmsh's Abaqus writer emits 1D (e.g. T3D2) and 2D (e.g. CPS3) boundary
-        # mesh alongside 3D tets. CPS3 expects a thickness on *SOLID SECTION;
-        # our solver deck only assigns *SOLID SECTION to ALL_ELEMS (3D), so
-        # CalculiX hits gen3delem "first thickness ... is zero".  Drop 1D/2D
-        # mesh before export — the FE model is 3D solid only.
-        try:
-            gmsh.model.mesh.clear(1)
-            gmsh.model.mesh.clear(2)
-        except Exception as exc:
-            logger.warning(
-                "Could not strip 1D/2D mesh before Abaqus export: %s", exc
-            )
+        # gmsh.model.mesh.clear expects a list of (dim, tag) entity pairs, not bare
+        # integers; stripping via API is also brittle for mesh-only models. We
+        # instead post-process the written Abaqus file to drop non-C3D *ELEMENT
+        # sections (T3D2, CPS3, …).
         gmsh.write(str(output_inp))
+        strip_non_c3d_element_blocks_from_abaqus_inp(output_inp)
         
         # Extract nodal coordinates
         node_tags, coord, _ = gmsh.model.mesh.getNodes()
