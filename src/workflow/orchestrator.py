@@ -483,6 +483,7 @@ def _run_reporting_if_enabled(
     project_root: Path,
     warnings: list[str],
     meta: dict[str, Any],
+    case_definitions: Mapping[str, CaseDefinition] | None = None,
 ) -> Optional[Any]:
     """
     Run the reporting module after ranking if enabled.
@@ -491,12 +492,14 @@ def _run_reporting_if_enabled(
     and ranking_result for the filtered/ranked outputs.
 
     Args:
-        options:          Orchestrator options.
-        all_case_results: ``{case_id: CaseResult}`` for all attempted cases.
-        ranking_result:   Ranking output (or None).
-        project_root:     Project root for report output resolution.
-        warnings:         Mutable warning list.
-        meta:             Mutable metadata dict for timing.
+        options:            Orchestrator options.
+        all_case_results:   ``{case_id: CaseResult}`` for all attempted cases.
+        ranking_result:     Ranking output (or None).
+        project_root:       Project root for report output resolution.
+        warnings:           Mutable warning list.
+        meta:               Mutable metadata dict for timing.
+        case_definitions:   ``{case_id: CaseDefinition}`` for design-grouped
+                            plots and CSV (recommended).
 
     Returns:
         Reporting result object or None.
@@ -523,6 +526,8 @@ def _run_reporting_if_enabled(
         reporting_result = generate_reports(
             case_results=all_case_results,
             ranking_result=ranking_result,
+            case_definitions=case_definitions,
+            project_root=project_root,
             reports_dir=reports_dir,
             top_n_filtered=options.top_n_filtered,
         )
@@ -788,8 +793,15 @@ def run_cases(
     # ------------------------------------------------------------------
     # 7. Reporting
     # ------------------------------------------------------------------
+    case_def_map = case_definitions_by_id(runnable_cases)
     reporting_result = _run_reporting_if_enabled(
-        options, all_case_results, ranking_result, resolved_root, warnings, meta
+        options,
+        all_case_results,
+        ranking_result,
+        resolved_root,
+        warnings,
+        meta,
+        case_definitions=case_def_map,
     )
 
     # ------------------------------------------------------------------
@@ -809,7 +821,11 @@ def run_cases(
     if sum_failed > 0:
         logger.info("%d case(s) failed.", sum_failed)
 
-    success_overall = len(successful_results) > 0 and sum_failed == 0
+    n_runnable = len(runnable_cases)
+    all_skipped = n_runnable > 0 and sum_skipped == n_runnable
+    success_overall = sum_failed == 0 and (
+        len(successful_results) > 0 or all_skipped
+    )
     err_msg: str | None = None
     if sum_failed > 0 and not success_overall:
         err_msg = f"{sum_failed} case(s) failed during the sweep."
