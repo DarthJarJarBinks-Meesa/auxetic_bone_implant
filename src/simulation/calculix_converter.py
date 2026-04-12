@@ -58,6 +58,18 @@ def convert_msh_to_inp(msh_path: str | Path) -> str:
     try:
         # Load mesh and export basic nodes/elements to INP
         gmsh.open(str(msh_path))
+        # Gmsh's Abaqus writer emits 1D (e.g. T3D2) and 2D (e.g. CPS3) boundary
+        # mesh alongside 3D tets. CPS3 expects a thickness on *SOLID SECTION;
+        # our solver deck only assigns *SOLID SECTION to ALL_ELEMS (3D), so
+        # CalculiX hits gen3delem "first thickness ... is zero".  Drop 1D/2D
+        # mesh before export — the FE model is 3D solid only.
+        try:
+            gmsh.model.mesh.clear(1)
+            gmsh.model.mesh.clear(2)
+        except Exception as exc:
+            logger.warning(
+                "Could not strip 1D/2D mesh before Abaqus export: %s", exc
+            )
         gmsh.write(str(output_inp))
         
         # Extract nodal coordinates

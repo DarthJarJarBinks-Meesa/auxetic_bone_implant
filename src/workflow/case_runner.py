@@ -714,6 +714,19 @@ def _run_meshing_pipeline(
     return mesh_path
 
 
+def _error_message_for_failed_solver_run(
+    warnings: list[str],
+    return_code: int | None,
+) -> str:
+    """Pick a concise error string after a non-zero CalculiX exit."""
+    for w in reversed(warnings):
+        if "CalculiX returned failure:" in w or "CalculiX failed:" in w:
+            return w
+    if return_code is not None:
+        return f"CalculiX exited with code {return_code}."
+    return "CalculiX did not complete successfully."
+
+
 def _run_solver_pipeline(
     case_definition: CaseDefinition,
     mesh_path: Path,
@@ -1211,8 +1224,19 @@ def run_case(
             continue_on_partial=options.continue_on_partial_postprocess,
         )
 
-        final_status = CaseStatus.COMPLETED
-        logger.info("Case '%s': all pipeline stages completed.", case_id)
+        if options.run_solver and not solver_success:
+            final_status = CaseStatus.FAILED
+            error_message = _error_message_for_failed_solver_run(
+                warnings, solver_return_code
+            )
+            logger.error(
+                "Case '%s': FAILED — solver run unsuccessful (return_code=%s).",
+                case_id,
+                solver_return_code,
+            )
+        else:
+            final_status = CaseStatus.COMPLETED
+            logger.info("Case '%s': all pipeline stages completed.", case_id)
 
     except CaseRunnerError as exc:
         error_message = str(exc)
