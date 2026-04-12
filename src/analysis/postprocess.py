@@ -25,10 +25,11 @@ ARCHITECTURAL DECISION — honest partial results, not fake full parsing:
     but binary parsing is a future-version extension.
 
 ARCHITECTURAL DECISION — ``.dat`` file as primary text result source:
-    CalculiX writes summary quantities (max/min node results) to the
-    ``.dat`` file when ``*NODE FILE`` / ``*EL FILE`` output requests are
-    present.  This file is human-readable and the most practical source
-    of scalar extraction in version 1.  stdout logs are a secondary fallback.
+    CalculiX writes ASCII tables to ``.dat`` for ``*NODE PRINT`` /
+    ``*EL PRINT`` (nodal ``U`` and integration-point ``S``, etc.).  Summary
+    lines from older decks or ``*NODE FILE``/``*EL FILE`` may also appear.
+    The postprocessor scans summary regexes first, then the last ``*PRINT``
+    table blocks.  stdout logs remain a secondary fallback.
 
 ARCHITECTURAL DECISION — regex parsers are heuristic and version-1 scoped:
     The ``.dat`` format is not fully standardised across CalculiX versions.
@@ -44,6 +45,7 @@ and the solver input deck unit system).
 from __future__ import annotations
 
 import logging
+import math
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -498,6 +500,142 @@ def parse_stress_strain_points(
 
 
 # ---------------------------------------------------------------------------
+# CalculiX *.dat table parsers (*NODE PRINT / *EL PRINT)
+# ---------------------------------------------------------------------------
+# *NODE FILE / *EL FILE write primarily to .frd (often binary).  *NODE PRINT
+# and *EL PRINT append ASCII tables to jobname.dat; we scan the last block
+# after each standard CalculiX header line.
+
+# Headers may include a parenthesised field list or omit it (CalculiX version dependent).
+_HEADER_DISP_BLOCK = re.compile(
+    r"(?i)^\s*displacements(?:\s*\([^)]*\))?\s+for\s+set\s"
+)
+_HEADER_STRESS_BLOCK = re.compile(
+    r"(?i)^\s*stresses(?:\s*\([^)]*\))?\s+for\s+set\s"
+)
+
+# Element integration-point Cauchy stress: elem intpt sxx syy szz sxy sxz syz
+_STRESS_TABLE_LINE = re.compile(
+    r"^\s*(\d+)\s+(\d+)\s+"
+    r"([-+eE0-9.]+)\s+([-+eE0-9.]+)\s+([-+eE0-9.]+)\s+"
+    r"([-+eE0-9.]+)\s+([-+eE0-9.]+)\s+([-+eE0-9.]+)\s*$"
+)
+# Nodal displacement: node ux uy uz (static 3-D mechanical)
+_DISP_TABLE_LINE = re.compile(
+    r"^\s*(\d+)\s+"
+    r"([-+eE0-9.]+)\s+([-+eE0-9.]+)\s+([-+eE0-9.]+)\s*$"
+)
+
+
+def von_mises_from_cauchy_voigt(
+    sxx: float,
+    syy: float,
+    szz: float,
+    sxy: float,
+    sxz: float,
+    syz: float,
+) -> float:
+    """
+    Von Mises stress (same units as components) from Cauchy tensor Voigt form.
+
+    Voigt order: ``sxx, syy, szz, sxy, sxz, syz`` (engineering shear components).
+    """
+    return math.sqrt(
+        0.5
+        * (
+            (sxx - syy) ** 2
+            + (syy - szz) ** 2
+            + (szz - sxx) ** 2
+            + 6.0 * (sxy * sxy + sxz * sxz + syz * syz)
+        )
+    )
+
+
+def _lines_after_last_header(
+    text: str,
+    header_re: re.Pattern[str],
+    *,
+    stop_before: tuple[re.Pattern[str], ...] = (),
+) -> list[str]:
+    """Return data lines following the **last** ``header_re`` match until a stop."""
+    lines = text.splitlines()
+    last_i: int | None = None
+    for i, line in enumerate(lines):
+        if header_re.search(line):
+            last_i = i
+    if last_i is None:
+        return []
+    block: list[str] = []
+    for line in lines[last_i + 1 :]:
+        raw = line.rstrip("\n")
+        stripped = raw.strip()
+        if not stripped:
+            if block:
+                break
+            continue
+        if stripped.startswith("*"):
+            break
+        skip_stop = False
+        for stop in stop_before:
+            if stop.search(stripped):
+                skip_stop = True
+                break
+        if skip_stop:
+            break
+        block.append(raw)
+    return block
+
+
+def parse_max_displacement_from_dat_print_tables(text: str) -> float | None:
+    """
+    Max |U| from the last *NODE PRINT ``U`` table in a CalculiX ``.dat`` file.
+
+    Expects a header line like
+    ``displacements (vx,vy,vz) for set ALL_NODES and time ...``
+    followed by lines ``<node> <ux> <uy> <uz>``.
+    """
+    best = 0.0
+    found = False
+    for raw in _lines_after_last_header(
+        text, _HEADER_DISP_BLOCK, stop_before=(_HEADER_STRESS_BLOCK,)
+    ):
+        m = _DISP_TABLE_LINE.match(raw)
+        if not m:
+            continue
+        ux, uy, uz = (float(m.group(2)), float(m.group(3)), float(m.group(4)))
+        mag = math.sqrt(ux * ux + uy * uy + uz * uz)
+        if mag > best:
+            best = mag
+        found = True
+    return best if found else None
+
+
+def parse_max_von_mises_from_dat_print_tables(text: str) -> float | None:
+    """
+    Max von Mises from Cauchy ``S`` at integration points in the last *EL PRINT
+    table in ``.dat``.
+
+    Expects a header like ``stresses (..) for set ALL_ELEMS and time ...`` and
+    lines ``<elem> <intpt> <sxx> <syy> <szz> <sxy> <sxz> <syz>``.
+    """
+    best = 0.0
+    found = False
+    for raw in _lines_after_last_header(
+        text, _HEADER_STRESS_BLOCK, stop_before=(_HEADER_DISP_BLOCK,)
+    ):
+        m = _STRESS_TABLE_LINE.match(raw)
+        if not m:
+            continue
+        sxx, syy, szz = float(m.group(3)), float(m.group(4)), float(m.group(5))
+        sxy, sxz, syz = float(m.group(6)), float(m.group(7)), float(m.group(8))
+        vm = von_mises_from_cauchy_voigt(sxx, syy, szz, sxy, sxz, syz)
+        if vm > best:
+            best = vm
+        found = True
+    return best if found else None
+
+
+# ---------------------------------------------------------------------------
 # Combined artifact parsing
 # ---------------------------------------------------------------------------
 
@@ -523,17 +661,12 @@ def extract_scalar_results_from_artifacts(
     warnings: list[str] = []
     sources_used: list[str] = []
 
-    # --- Check if FRD is present (log it but don't attempt binary parse) ---
+    # --- FRD metadata (binary FRD is not parsed; *NODE PRINT / *EL PRINT .dat is) ---
     if artifacts.frd_path:
         result.metadata["frd_path"] = artifacts.frd_path
         result.metadata["frd_binary_parsing"] = (
-            "FRD file detected but not parsed in version 1.  "
-            "Full binary FRD parsing is a future-version extension."
-        )
-        warnings.append(
-            f"FRD file found at '{artifacts.frd_path}' but binary FRD "
-            f"parsing is not implemented in version 1.  "
-            f"Scalar results will be extracted from .dat / log files only."
+            "FRD file detected; binary FRD parsing is not implemented.  "
+            "Scalars are taken from .dat tables (*NODE PRINT / *EL PRINT) or summaries."
         )
 
     # --- Assemble text sources ---
@@ -565,41 +698,54 @@ def extract_scalar_results_from_artifacts(
 
     result.metadata["sources_used"] = sources_used
 
-    # --- Extract scalars ---
+    # --- Extract scalars (summary regexes, then *PRINT table fallbacks) ---
     max_mises = parse_max_von_mises_stress(combined_text)
+    if max_mises is None:
+        max_mises = parse_max_von_mises_from_dat_print_tables(combined_text)
     if max_mises is not None:
         metrics["max_von_mises_stress_mpa"] = max_mises
     else:
         warnings.append(
             "max_von_mises_stress_mpa could not be extracted from available "
-            "text artifacts.  Check that *EL FILE output includes S, MISES."
+            "text artifacts.  Ensure the solver deck includes *EL PRINT with S "
+            "(see solver_exporter._build_output_block) or *EL FILE S, MISES."
         )
 
     max_disp = parse_max_displacement(combined_text)
+    if max_disp is None:
+        max_disp = parse_max_displacement_from_dat_print_tables(combined_text)
     if max_disp is not None:
         metrics["max_displacement_mm"] = max_disp
     else:
         warnings.append(
             "max_displacement_mm could not be extracted.  "
-            "Check that *NODE FILE output includes U."
+            "Ensure *NODE PRINT includes U or *NODE FILE includes U."
         )
 
     hotspot = parse_hotspot_stress(combined_text)
     if hotspot is not None:
         metrics["hotspot_stress_mpa"] = hotspot
+    elif max_mises is not None:
+        metrics["hotspot_stress_mpa"] = max_mises
     else:
         warnings.append(
-            "hotspot_stress_mpa not found in text output.  "
-            "The fatigue proxy will fall back to max_von_mises_stress_mpa."
+            "hotspot_stress_mpa not found in text output and max von Mises is "
+            "unavailable; fatigue proxy cannot use a stress peak."
         )
 
     ss_points = parse_stress_strain_points(combined_text)
     if ss_points:
         result.stress_strain_points = ss_points
-    else:
+    elif max_mises is None:
         warnings.append(
-            "No stress-strain data points found in text output.  "
-            "Stress-strain curve will be empty."
+            "No stress-strain data points found in text output and stress "
+            "summaries are missing; effective-modulus proxies may be unavailable."
+        )
+
+    if artifacts.frd_path and (max_mises is None or max_disp is None):
+        warnings.append(
+            f"FRD present at '{artifacts.frd_path}' but key scalars are still "
+            f"missing; check .dat for *NODE PRINT / *EL PRINT tables or FRD parsing."
         )
 
     result.metrics = metrics

@@ -593,10 +593,18 @@ def _build_output_block() -> str:
     return textwrap.dedent("""\
         **
         ** === OUTPUT REQUESTS ===
+        ** *NODE FILE / *EL FILE  →  .frd (GraphiX; often binary — not parsed in v1)
         *NODE FILE
         U, RF
         *EL FILE
         S, MISES, LE
+        **
+        ** === PRINT OUTPUT (ASCII jobname.dat for postprocess.py) ===
+        ** Summary regexes rarely match modern .dat; per-node / int.-pt. tables do.
+        *NODE PRINT, NSET=ALL_NODES, GLOBAL=YES
+        U, RF
+        *EL PRINT, ELSET=ALL_ELEMS, GLOBAL=YES
+        S
         *END STEP
     """)
 
